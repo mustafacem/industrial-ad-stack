@@ -1,0 +1,5 @@
+# QoS overrides for `ros2 bag play`: /tf_static must be latched for late-joining nodes.
+/tf_static:
+  history: keep_all
+  durability: transient_local
+  reliability: reliable

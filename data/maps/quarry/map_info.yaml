@@ -1,0 +1,3 @@
+# Geodetic origin of the map frame (ENU) for pointcloud_map.pcd and costmap.pgm
+site: quarry
+origin: {latitude: 35.99, longitude: 139.08, altitude: 0.0}

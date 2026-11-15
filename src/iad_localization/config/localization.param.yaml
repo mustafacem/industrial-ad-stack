@@ -1,0 +1,16 @@
+# iad_localization parameters. map_file / map_origin.* / vehicle.* are set by the launch file.
+/**:
+  ros__parameters:
+    use_ndt: true
+    ndt_resolution: 2.0          # fine NDT voxel [m] (coarse level = 2x)
+    scan_voxel: 1.0              # scan downsampling [m]
+    min_intensity: 5.0           # weak returns (dust, spray) are not scan-matched
+    # initial_pose: [x, y, yaw]    # optional; default = /initialpose or automatic (GNSS + correlative search + NDT)
+    map_frame: map
+    base_frame: base_link
+    publish_tf: true
+    lidar_topic: /sensing/lidar/top/points
+    imu_topic: /sensing/imu/data
+    gnss_topic: /sensing/gnss/fix
+    velocity_topic: /vehicle/status/velocity
+    init_search_window: 5.0      # +- [m] around the GNSS fix for the global (correlative) initialisation

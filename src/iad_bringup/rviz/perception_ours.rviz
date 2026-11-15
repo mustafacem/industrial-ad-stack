@@ -1,0 +1,243 @@
+Panels: []
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Ego
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Value: /viz/ego
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Point-cloud map
+    Enabled: true
+    Alpha: 0.25
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: AxisColor
+    Color: 255; 255; 255
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.25
+    Style: Flat Squares
+    Topic:
+      Value: /map/pointcloud_map
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+    Axis: Z
+    Autocompute Value Bounds:
+      Max Value: 12
+      Min Value: -3
+      Value: false
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Ground
+    Enabled: true
+    Alpha: 0.75
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 90; 200; 120
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.1
+    Style: Flat Squares
+    Topic:
+      Value: /perception/points/ground
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Obstacles
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 255; 72; 56
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.15
+    Style: Flat Squares
+    Topic:
+      Value: /perception/points/obstacle
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Overhang
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 160; 120; 255
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.12
+    Style: Flat Squares
+    Topic:
+      Value: /perception/points/overhang
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Dust (removed)
+    Enabled: true
+    Alpha: 0.8
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 255; 214; 64
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.12
+    Style: Flat Squares
+    Topic:
+      Value: /perception/points/dust
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Best Effort
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/Map
+    Name: Occupancy
+    Enabled: true
+    Alpha: 0.3
+    Color Scheme: costmap
+    Draw Behind: false
+    Binary representation: false
+    Binary threshold: 100
+    Topic:
+      Value: /perception/occupancy_grid
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Update Topic:
+      Value: /perception/occupancy_grid_updates
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Timestamp: false
+    Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Objects
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Value: /perception/objects/markers
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Value: true
+  - Class: rviz_2d_overlay_plugins/TextOverlay
+    Name: HUD
+    Enabled: true
+    Topic:
+      Value: /hud/perception
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Value: true
+    Overtake Position Properties: false
+    Overtake FG Color Properties: false
+    Overtake BG Color Properties: false
+    Align Bottom: false
+  Enabled: true
+  Global Options:
+    Background Color: 30; 34; 42
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools: []
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/ThirdPersonFollower
+      Distance: 52
+      Focal Point:
+        X: 10
+        Y: 0
+        Z: 1
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.01
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.05
+      Pitch: 0.5
+      Target Frame: base_link
+      Value: ThirdPersonFollower (rviz_default_plugins)
+      Yaw: 3.6
+    Saved: null
+Window Geometry:
+  Height: 1189
+  Width: 1010
+  X: 1010
+  Y: 0
+  Hide Left Dock: true
+  Hide Right Dock: true

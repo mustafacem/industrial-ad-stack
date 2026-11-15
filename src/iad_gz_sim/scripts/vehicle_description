@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Publishes the vehicle's sensor extrinsics on /tf_static: the *nominal* values (what calibration
+starts from, optionally perturbed) and, for evaluation only, the true ones as JSON on
+/sim/ground_truth/extrinsics (latched)."""
+import json
+
+import rclpy
+from geometry_msgs.msg import TransformStamped
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import String
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
+
+from iad_gz_sim.vehicles import _quat, sensor_frames
+
+
+class VehicleDescription(Node):
+    def __init__(self):
+        super().__init__("vehicle_description")
+        vehicle = self.declare_parameter("vehicle", "haul_truck").value
+        corners = self.declare_parameter("corner_lidars", False).value
+        err_deg = self.declare_parameter("extrinsic_error_deg", 0.0).value
+        err_m = self.declare_parameter("extrinsic_error_m", 0.0).value
+        seed = self.declare_parameter("seed", 7).value
+        nominal, truth = sensor_frames(vehicle, corners, err_deg, err_m, seed)
+        self.tfb = StaticTransformBroadcaster(self)
+        tfs = []
+        for child, xyz, rpy in nominal:
+            t = TransformStamped()
+            t.header.stamp = self.get_clock().now().to_msg()
+            t.header.frame_id, t.child_frame_id = "base_link", child
+            t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = xyz
+            q = _quat(*rpy)
+            t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w = q
+            tfs.append(t)
+        self.tfb.sendTransform(tfs)
+        qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.pub = self.create_publisher(String, "/sim/ground_truth/extrinsics", qos)
+        self.pub.publish(String(data=json.dumps({
+            "truth": {c: {"xyz": list(x), "rpy": list(r)} for c, x, r in truth},
+            "nominal": {c: {"xyz": list(x), "rpy": list(r)} for c, x, r in nominal}})))
+        self.get_logger().info(f"{vehicle}: {len(nominal)} sensor frames (extrinsic error {err_deg} deg / {err_m} m)")
+
+
+def main():
+    rclpy.init()
+    n = VehicleDescription()
+    rclpy.spin(n)
+
+
+if __name__ == "__main__":
+    main()

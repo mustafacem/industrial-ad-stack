@@ -1,0 +1,5 @@
+# base_link -> lidar extrinsics (x y z [m], roll pitch yaw [rad]) from iad_calibration
+lidar_front_left: {x: 10.0475, y: 1.54437, z: 1.95446, roll: 0.000254154, pitch: 0.173785, yaw: 0.785226}  # error vs truth 0.0468495 deg, 0.761075 cm
+lidar_front_right: {x: 10.045, y: -1.55559, z: 1.95128, roll: 0.00068085, pitch: 0.174696, yaw: -0.785368}  # error vs truth 0.0398539 deg, 0.762629 cm
+lidar_rear_left: {x: -3.05952, y: 1.5499, z: 1.95192, roll: -0.000923192, pitch: 0.173832, yaw: 2.35572}  # error vs truth 0.0681631 deg, 0.971069 cm
+lidar_rear_right: {x: -3.02404, y: -1.55001, z: 1.94995, roll: -0.000359485, pitch: 0.175741, yaw: -2.35682}  # error vs truth 0.0788973 deg, 2.59614 cm

@@ -1,0 +1,12 @@
+# iad_control parameters. vehicle.* is set per vehicle by the launch file.
+/**:
+  ros__parameters:
+    algorithm: mpc                 # mpc | pure_pursuit (baseline)
+    delay_compensation: true       # replay the commands still in the actuator pipe before solving
+    grade_feedforward: true
+    odom_topic: /localization/kinematic_state
+    lookahead_min: 6.0             # pure pursuit [m]
+    lookahead_gain: 1.2            # pure pursuit [s]
+    kp_speed: 0.6
+    ki_speed: 0.25
+    rolling_resistance_ff: 0.03    # fraction of g (haul road)

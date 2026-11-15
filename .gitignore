@@ -1,0 +1,9 @@
+build/
+install/
+log/
+output/
+.home/
+__pycache__/
+*.pyc
+data/bags/
+media/v2/*.mp4

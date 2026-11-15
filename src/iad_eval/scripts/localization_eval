@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Scores iad_localization against Gazebo ground truth (evaluation only; not part of the stack).
+
+Subscribes /sim/ground_truth/odom (map -> base_link truth) and /localization/metrics (poses of the fused
+filter and of the three reduced variants), interpolates the truth at each metrics stamp and publishes
+/eval/localization (JSON: current error, RMS, max per variant), a truth trail for RViz, and on exit a
+summary + JSONL log."""
+import bisect
+import json
+import math
+import os
+
+import rclpy
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry, Path
+from rclpy.node import Node
+from std_msgs.msg import String
+
+VARIANTS = ("fused", "gnss_gated", "gnss_raw", "dead_reckoning")
+
+
+class LocalizationEval(Node):
+    def __init__(self):
+        super().__init__("localization_eval")
+        self.settle = self.declare_parameter("settle_time", 3.0).value  # s after init excluded from RMS/max
+        self.log_path = self.declare_parameter("log", "").value
+        self.gt_t, self.gt = [], []
+        self.t0 = None
+        self.sum2 = {k: 0.0 for k in VARIANTS}
+        self.max = {k: 0.0 for k in VARIANTS}
+        self.n = 0
+        self.rows = []
+        self.trail = Path()
+        self.trail.header.frame_id = "map"
+        self.pub = self.create_publisher(String, "/eval/localization", 10)
+        self.trail_pub = self.create_publisher(Path, "/eval/localization/truth_path", 2)
+        self.create_subscription(Odometry, "/sim/ground_truth/odom", self.on_gt, 100)
+        self.create_subscription(String, "/localization/metrics", self.on_metrics, 20)
+
+    def on_gt(self, m):
+        t = m.header.stamp.sec + 1e-9 * m.header.stamp.nanosec
+        q = m.pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        self.gt_t.append(t)
+        self.gt.append((m.pose.pose.position.x, m.pose.pose.position.y, m.pose.pose.position.z, yaw))
+        if len(self.gt_t) > 20000:
+            self.gt_t, self.gt = self.gt_t[-10000:], self.gt[-10000:]
+        if len(self.gt) % 12 == 0:
+            p = PoseStamped()
+            p.header.frame_id = "map"
+            p.pose.position.x, p.pose.position.y, p.pose.position.z = self.gt[-1][0], self.gt[-1][1], self.gt[-1][2] + 0.15
+            p.pose.orientation.w = 1.0
+            self.trail.poses.append(p)
+            self.trail.header.stamp = m.header.stamp
+            self.trail_pub.publish(self.trail)
+
+    def truth(self, t):
+        i = bisect.bisect_left(self.gt_t, t)
+        if i >= len(self.gt_t) and len(self.gt_t) >= 2 and t - self.gt_t[-1] < 0.06:
+            i = len(self.gt_t) - 1  # a few ms past the newest truth sample (IMU-rate stamps): extrapolate
+        if i == 0 or i >= len(self.gt_t):
+            return None
+        t0, t1 = self.gt_t[i - 1], self.gt_t[i]
+        u = min(2.0, (t - t0) / max(1e-9, t1 - t0))
+        a, b = self.gt[i - 1], self.gt[i]
+        return (a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1]), a[3] + u * math.remainder(b[3] - a[3], 2 * math.pi))
+
+    def on_metrics(self, m):
+        self.n_msgs = getattr(self, "n_msgs", 0) + 1
+        try:
+            j = json.loads(m.data)
+        except json.JSONDecodeError as e:
+            self.n_bad = getattr(self, "n_bad", 0) + 1
+            self.last_bad = str(e) + " | " + m.data[:200]
+            return
+        g = self.truth(j["t"])
+        if g is None:
+            self.n_miss = getattr(self, "n_miss", 0) + 1
+            self.last_miss = (j["t"], self.gt_t[0] if self.gt_t else None, self.gt_t[-1] if self.gt_t else None)
+            return
+        if self.t0 is None:
+            self.t0 = j["t"]
+        settled = j["t"] - self.t0 > self.settle
+        out = {"t": j["t"], "gnss_status": j.get("gnss_status"), "settled": settled,
+               "ndt": {k: j.get(k) for k in ("ndt_nvtl", "ndt_ms", "ndt_used", "ndt_rejected", "ndt_bad", "ndt_age", "ndt_std",
+                                             "ndt_pts", "gnss_rejected_fused", "odom_scale")}}
+        for k in VARIANTS:
+            e = math.hypot(j[k]["x"] - g[0], j[k]["y"] - g[1])
+            if settled:
+                self.sum2[k] += e * e
+                self.max[k] = max(self.max[k], e)
+            out[k] = {"err": e, "yaw_err_deg": abs(math.degrees(math.remainder(j[k]["yaw"] - g[2], 2 * math.pi))),
+                      "rms": math.sqrt(self.sum2[k] / max(1, self.n + settled)), "max": self.max[k]}
+        self.n += settled
+        self.rows.append(out)
+        self.pub.publish(String(data=json.dumps(out)))
+
+    def summary(self):
+        dbg = (f" (msgs {getattr(self, 'n_msgs', 0)}, unparsable {getattr(self, 'n_bad', 0)} {getattr(self, 'last_bad', '')}, "
+               f"no truth {getattr(self, 'n_miss', 0)} {getattr(self, 'last_miss', '')})")
+        if not self.n:
+            return "localization_eval: no scored samples" + dbg
+        lines = [f"localization_eval: {self.n} samples ({self.rows[-1]['t'] - self.t0:.0f} s)"]
+        for k in VARIANTS:
+            lines.append(f"  {k:15s} RMS {math.sqrt(self.sum2[k] / self.n):7.3f} m   max {self.max[k]:7.3f} m")
+        return "\n".join(lines)
+
+
+def main():
+    rclpy.init()
+    n = LocalizationEval()
+    try:
+        rclpy.spin(n)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    print(n.summary(), flush=True)
+    if n.log_path:
+        os.makedirs(os.path.dirname(os.path.abspath(n.log_path)), exist_ok=True)
+        with open(n.log_path, "w") as f:
+            for r in n.rows:
+                f.write(json.dumps(r) + "\n")
+
+
+if __name__ == "__main__":
+    main()

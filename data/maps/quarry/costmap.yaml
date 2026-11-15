@@ -1,0 +1,7 @@
+image: costmap.pgm
+mode: raw
+resolution: 0.5
+origin: [-200, -150, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

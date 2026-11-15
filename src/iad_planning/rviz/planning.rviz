@@ -1,0 +1,101 @@
+Panels: []
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/Map
+    Name: Site costmap
+    Enabled: true
+    Alpha: 0.55
+    Color Scheme: map
+    Draw Behind: false
+    Binary representation: false
+    Binary threshold: 100
+    Topic:
+      Value: /map/occupancy_grid
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Update Topic:
+      Value: /map/occupancy_grid_updates
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Timestamp: false
+    Value: true
+  - Class: rviz_default_plugins/Map
+    Name: Live occupancy
+    Enabled: true
+    Alpha: 0.3
+    Color Scheme: costmap
+    Draw Behind: false
+    Binary representation: false
+    Binary threshold: 100
+    Topic:
+      Value: /perception/occupancy_grid
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Update Topic:
+      Value: /perception/occupancy_grid_updates
+      Depth: 1
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Timestamp: false
+    Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Trajectory
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Value: /planning/markers
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Value: true
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Search tree
+    Enabled: true
+    Namespaces: {}
+    Topic:
+      Value: /planning/search
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 30; 34; 42
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools: []
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Current View
+      Near Clip Distance: 0.01
+      Scale: 2.5
+      Angle: 0.0
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz_default_plugins)
+      X: 150
+      Y: 100
+      Invert Z Axis: false
+    Saved: null
+Window Geometry:
+  Height: 1189
+  Width: 1970
+  X: 0
+  Y: 0
+  Hide Left Dock: true
+  Hide Right Dock: true

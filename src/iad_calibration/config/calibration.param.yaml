@@ -1,0 +1,12 @@
+# iad_calibration parameters. vehicle.* (self-filter box) and output are set by the launch file.
+/**:
+  ros__parameters:
+    lidars: [front_left, front_right, rear_left, rear_right]   # topics /sensing/lidar/<name>/points, frames lidar_<name>
+    reference: top                 # the reference LiDAR (its extrinsic is trusted)
+    odom_topic: /localization/kinematic_state
+    ground_scans: 10               # standstill scans for the ground-plane step
+    keyframe_spacing: 2.5          # [m]
+    max_keyframes: 40
+    max_iterations: 25
+    max_iterations_6dof: 15         # final refinement of roll, pitch, yaw and x, y, z
+    iteration_period: 0.35         # [s] one Gauss-Newton step per period (visible convergence)

@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Starts the (paused) Gazebo world once the ROS side is up and ends the run after `duration` seconds
+of sim time, so launch files can tear everything down (the launch has on_exit=Shutdown on this node)."""
+import subprocess
+import time
+
+import rclpy
+from rclpy.clock import Clock as RosClock, ClockType
+from rclpy.node import Node
+from rosgraph_msgs.msg import Clock
+
+
+class Supervisor(Node):
+    def __init__(self):
+        super().__init__("sim_supervisor")
+        self.world = self.declare_parameter("world", "quarry").value
+        self.duration = self.declare_parameter("duration", 0.0).value
+        self.start_after = self.declare_parameter("start_after", 6.0).value
+        self.t_wall0 = time.time()
+        self.started = self.start_after < 0
+        self.sim_t = 0.0
+        self.create_subscription(Clock, "/clock", self.on_clock, 10)
+        # wall-clock timer: with use_sim_time a ROS timer would never fire while the world is paused
+        self.create_timer(0.2, self.tick, clock=RosClock(clock_type=ClockType.STEADY_TIME))
+
+    def on_clock(self, m):
+        self.sim_t = m.clock.sec + 1e-9 * m.clock.nanosec
+
+    def tick(self):
+        if not self.started and time.time() - self.t_wall0 > self.start_after:
+            r = subprocess.run(["gz", "service", "-s", f"/world/{self.world}/control", "--reqtype", "gz.msgs.WorldControl",
+                                "--reptype", "gz.msgs.Boolean", "--timeout", "5000", "--req", "pause: false"],
+                               capture_output=True, text=True)
+            self.get_logger().info(f"unpause /world/{self.world}: {r.stdout.strip() or r.stderr.strip()}")
+            self.started = "true" in r.stdout
+            if not self.started:
+                self.t_wall0 = time.time() - self.start_after + 1.0
+        if self.duration > 0 and self.sim_t >= self.duration:
+            self.get_logger().info(f"duration {self.duration:.0f} s of sim time reached")
+            raise SystemExit(0)
+
+
+def main():
+    rclpy.init()
+    try:
+        rclpy.spin(Supervisor())
+    except SystemExit:
+        pass
+
+
+if __name__ == "__main__":
+    main()

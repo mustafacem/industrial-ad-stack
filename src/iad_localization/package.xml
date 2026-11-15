@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>iad_localization</name>
+  <version>3.0.0</version>
+  <description>Standalone localization for GNSS-degraded sites: EKF (wheel odometry, gyro, chi2-gated GNSS,
+    delayed-measurement replay) + multi-resolution point-to-plane NDT against a PCD map; GNSS + NDT yaw-search
+    global initialisation. Standard inputs (PointCloud2, Imu, NavSatFix, TwistWithCovarianceStamped).</description>
+  <maintainer email="dev@example.com">iad</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
+  <depend>eigen</depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>tf2_ros_py</test_depend>
+  <test_depend>python3-numpy</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

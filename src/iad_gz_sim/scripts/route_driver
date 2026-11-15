@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Stand-in safety driver for demos that evaluate one subsystem while the truck simply has to move
+(perception, localization, calibration drives). Follows a route from site.yaml using *ground-truth*
+odometry: pure pursuit + a P speed loop, sent as ackermann_msgs/AckermannDriveStamped on
+/control/command. It is part of the simulator, not of the autonomy stack."""
+import math
+
+import rclpy
+import yaml
+from ackermann_msgs.msg import AckermannDriveStamped
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+
+
+class RouteDriver(Node):
+    def __init__(self):
+        super().__init__("route_driver")
+        site = yaml.safe_load(open(self.declare_parameter("site_file", "").value))
+        route = site["routes"][self.declare_parameter("route", "haul").value]
+        self.pts = [tuple(p) for p in route["points"]]
+        self.loop = self.declare_parameter("loop", bool(route.get("loop", False))).value
+        self.speed = self.declare_parameter("speed", float(route.get("speed", 5.0))).value
+        self.wheelbase = self.declare_parameter("wheelbase", 4.3).value
+        self.delay = self.declare_parameter("start_delay", 1.0).value
+        self.max_steer = self.declare_parameter("max_steer", 0.6).value
+        self.idx, self.t0, self.done = 0, None, False
+        self.pub = self.create_publisher(AckermannDriveStamped, "/control/command", 10)
+        self.create_subscription(Odometry, "/sim/ground_truth/odom", self.on_odom, 10)
+
+    def curvature_ahead(self, i0, dist):
+        n, k_max, travelled = len(self.pts), 0.0, 0.0
+        for k in range(i0, i0 + 200):
+            if not self.loop and k + 2 >= n:
+                break
+            a, b, c = self.pts[k % n], self.pts[(k + 1) % n], self.pts[(k + 2) % n]
+            h1, h2 = math.atan2(b[1] - a[1], b[0] - a[0]), math.atan2(c[1] - b[1], c[0] - b[0])
+            ds = max(1e-3, math.hypot(c[0] - a[0], c[1] - a[1]) / 2)
+            k_max = max(k_max, abs(math.remainder(h2 - h1, 2 * math.pi)) / ds)
+            travelled += math.hypot(b[0] - a[0], b[1] - a[1])
+            if travelled > dist:
+                break
+        return k_max
+
+    def on_odom(self, m: Odometry):
+        t = m.header.stamp.sec + 1e-9 * m.header.stamp.nanosec
+        if self.t0 is None:
+            self.t0 = t
+        x, y = m.pose.pose.position.x, m.pose.pose.position.y
+        q = m.pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        v = m.twist.twist.linear.x
+        n = len(self.pts)
+        # advance the target index along the route
+        best, bd = self.idx, 1e18
+        for k in range(self.idx, min(self.idx + 40, n + (n if self.loop else 0))):
+            px, py = self.pts[k % n]
+            d = (px - x) ** 2 + (py - y) ** 2
+            if d < bd:
+                best, bd = k, d
+        self.idx = best % n if self.loop else best
+        look = max(5.0, 1.1 * abs(v))
+        tx, ty = self.pts[-1]
+        k = self.idx
+        while True:
+            px, py = self.pts[k % n]
+            if math.hypot(px - x, py - y) >= look:
+                tx, ty = px, py
+                break
+            k += 1
+            if not self.loop and k >= n:
+                break
+        dx, dy = tx - x, ty - y
+        alpha = math.atan2(dy, dx) - yaw
+        steer = math.atan2(2 * self.wheelbase * math.sin(alpha), max(look, math.hypot(dx, dy)))
+        steer = max(-self.max_steer, min(self.max_steer, steer))
+        remaining = math.hypot(self.pts[-1][0] - x, self.pts[-1][1] - y) if not self.loop else 1e9
+        v_ref = 0.0 if (t - self.t0 < self.delay or self.done) else self.speed
+        if not self.loop and (self.idx >= n - 2 and remaining < 6.0):
+            self.done = True
+        v_ref = min(v_ref, max(0.0, 0.5 * (remaining - 3.0)))
+        # slow down for the curvature ahead (lateral acceleration <= 0.8 m/s^2) and for the current steering
+        k_ahead = self.curvature_ahead(self.idx, 25.0)
+        v_ref = min(v_ref, math.sqrt(0.8 / max(k_ahead, 1e-4)))
+        v_ref *= max(0.45, 1.0 - 1.2 * abs(steer))
+        acc = max(-2.0, min(1.2, 0.6 * (v_ref - v)))
+        if v_ref < 0.05 and abs(v) < 0.5:
+            acc = -1.0  # stopped / stopping: hold on the brakes (also on a slope)
+        cmd = AckermannDriveStamped()
+        cmd.header.stamp = m.header.stamp
+        cmd.drive.steering_angle = float(steer)
+        cmd.drive.acceleration = float(acc)
+        cmd.drive.speed = float(max(v_ref, 0.01))
+        self.pub.publish(cmd)
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(RouteDriver())
+
+
+if __name__ == "__main__":
+    main()

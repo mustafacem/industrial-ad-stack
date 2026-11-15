@@ -1,0 +1,22 @@
+# iad_perception parameters (haul truck defaults; vehicle.* is overridden by the launch file per vehicle).
+/**:
+  ros__parameters:
+    mode: ours                       # ours | naive (no dust filter + single RANSAC plane, the baseline)
+    input_topic: /sensing/lidar/top/points
+    map_frame: map
+    base_frame: base_link
+    max_range: 80.0
+    vehicle:
+      front: 6.6                     # base_link (rear axle, ground) -> front bumper [m]
+      rear: 2.8
+      width: 4.2
+      height: 4.4
+    dust:
+      low_intensity: 12.0            # weak echo threshold (sensor intensity units)
+      very_low_intensity: 4.0        # dust backscatter: kept only on a clean scan-line surface
+      max_weak_cluster_fraction: 0.6 # obstacle clusters with more weak echoes than this are residual dust
+      use_temporal: true             # remember solid voxels over the last sweeps
+      along_surface: 4               # range-consistent scan-line neighbours (of 6) that make a surface
+    grid:
+      size: 140.0                    # rolling occupancy window [m]
+      resolution: 0.5

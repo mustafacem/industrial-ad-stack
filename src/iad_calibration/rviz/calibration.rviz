@@ -1,0 +1,193 @@
+Panels: []
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Reference map (top LiDAR)
+    Enabled: true
+    Alpha: 0.5
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 200; 200; 200
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.12
+    Style: Flat Squares
+    Topic:
+      Value: /calibration/reference
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: front_left
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 255; 90; 90
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.14
+    Style: Flat Squares
+    Topic:
+      Value: /calibration/clouds/front_left
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: front_right
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 90; 255; 120
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.14
+    Style: Flat Squares
+    Topic:
+      Value: /calibration/clouds/front_right
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: rear_left
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 90; 160; 255
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.14
+    Style: Flat Squares
+    Topic:
+      Value: /calibration/clouds/rear_left
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/PointCloud2
+    Name: rear_right
+    Enabled: true
+    Alpha: 1.0
+    Autocompute Intensity Bounds: false
+    Min Intensity: 0
+    Max Intensity: 100
+    Channel Name: intensity
+    Color Transformer: FlatColor
+    Color: 255; 210; 60
+    Decay Time: 0
+    Position Transformer: XYZ
+    Selectable: false
+    Size (Pixels): 2
+    Size (m): 0.14
+    Style: Flat Squares
+    Topic:
+      Value: /calibration/clouds/rear_right
+      Depth: 2
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+    Use Fixed Frame: true
+    Use rainbow: true
+    Invert Rainbow: false
+    Value: true
+    Max Color: 255; 255; 255
+    Min Color: 0; 0; 0
+  - Class: rviz_default_plugins/TF
+    Name: TF
+    Enabled: true
+    Marker Scale: 3
+    Show Arrows: false
+    Show Axes: true
+    Show Names: false
+    Update Interval: 0
+    Frame Timeout: 15
+    Frames:
+      All Enabled: true
+    Tree: {}
+    Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 30; 34; 42
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools: []
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/ThirdPersonFollower
+      Distance: 45
+      Focal Point:
+        X: 5
+        Y: 0
+        Z: 1
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.01
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.05
+      Pitch: 0.6
+      Target Frame: base_link
+      Value: ThirdPersonFollower (rviz_default_plugins)
+      Yaw: 3.4
+    Saved: null
+Window Geometry:
+  Height: 1189
+  Width: 1970
+  X: 0
+  Y: 0
+  Hide Left Dock: true
+  Hide Right Dock: true

@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.8)
+project(iad_eval)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+set(CMAKE_CXX_STANDARD 17)
+add_compile_options(-Wall -Wextra -Wno-unused-parameter -O3)
+
+# Ground-truth evaluators. They need the simulated world (iad_gz_sim) and are never a dependency of a
+# subsystem: subsystems only see their standard inputs, the evaluators only read published outputs.
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(tf2_msgs REQUIRED)
+find_package(iad_gz_sim REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+add_executable(perception_eval src/perception_eval.cpp)
+target_link_libraries(perception_eval iad_gz_sim::iad_gz_world Eigen3::Eigen)
+ament_target_dependencies(perception_eval rclcpp sensor_msgs nav_msgs std_msgs tf2_msgs)
+install(TARGETS perception_eval DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/localization_eval scripts/control_eval scripts/calibration_eval DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+ament_package()

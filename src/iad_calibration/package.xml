@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>iad_calibration</name>
+  <version>3.0.0</version>
+  <description>Standalone multi-LiDAR extrinsic calibration while driving: ground-plane fit (roll, pitch, z) and
+    mapping-based point-to-plane registration against the reference LiDAR's accumulated map (yaw, x, y),
+    followed by a joint 6-DOF refinement.
+    In: sensor_msgs/PointCloud2 per LiDAR, nav_msgs/Odometry, nominal extrinsics on /tf_static.
+    Out: estimated extrinsics (YAML + JSON), TF calib/*, corrected clouds.</description>
+  <maintainer email="dev@example.com">iad</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
+  <depend>eigen</depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>python3-numpy</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>tf2_ros_py</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

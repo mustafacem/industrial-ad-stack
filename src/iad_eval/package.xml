@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>iad_eval</name>
+  <version>3.0.0</version>
+  <description>Ground-truth evaluators for the Gazebo runs (perception labels from world geometry,
+    localization / control errors from /sim/ground_truth/odom). Not a dependency of any subsystem.</description>
+  <maintainer email="dev@example.com">iad</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>iad_gz_sim</depend>
+  <depend>autoware_planning_msgs</depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <depend>eigen</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

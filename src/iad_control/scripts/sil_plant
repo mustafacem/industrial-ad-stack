@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Software-in-the-loop plant for iad_control: lets the controller run closed-loop with no simulator.
+
+Kinematic bicycle (base_link = rear axle) behind the same kind of actuator the real truck has: command dead
+time, first-order steering lag with a rate limit, drivetrain lag, acceleration limits, rolling resistance and
+an optional constant grade. Consumes /control/command; publishes /localization/kinematic_state, TF
+map->base_link, /vehicle/status/velocity and /vehicle/status/steering. With publish_demo_trajectory it also
+publishes a test trajectory (S-curve, stop, reverse into a bay) as autoware_planning_msgs/Trajectory."""
+import collections
+import math
+
+import rclpy
+from ackermann_msgs.msg import AckermannDriveStamped
+from autoware_planning_msgs.msg import Trajectory, TrajectoryPoint
+from autoware_vehicle_msgs.msg import SteeringReport
+from geometry_msgs.msg import TransformStamped, TwistWithCovarianceStamped
+from nav_msgs.msg import Odometry
+from rclpy.duration import Duration
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from tf2_ros import TransformBroadcaster
+
+
+def demo_trajectory(wheelbase):
+    """S-curve forward (60 m) then a reverse arc into a bay; v < 0 = reverse, 0 at the cusp and the end."""
+    pts = []
+    x, y, yaw, ds = 0.0, 0.0, 0.0, 0.5
+
+    def add(v, kappa):
+        pts.append((x, y, yaw, v, kappa))
+
+    n1 = 120
+    for i in range(n1 + 1):
+        s = i * ds
+        kappa = 0.02 * math.sin(2 * math.pi * s / 60.0)
+        v = min(4.0, 0.6 + 0.5 * s, 0.7 * math.sqrt(max(0.0, (n1 - i) * ds)))
+        add(v if i < n1 else 0.0, kappa)
+        x += ds * math.cos(yaw)
+        y += ds * math.sin(yaw)
+        yaw += ds * kappa
+    x, y, yaw = pts[-1][0], pts[-1][1], pts[-1][2]
+    n2 = 40
+    for i in range(1, n2 + 1):
+        kappa = 0.06
+        x -= ds * math.cos(yaw)
+        y -= ds * math.sin(yaw)
+        yaw -= ds * kappa
+        v = -min(1.2, 0.5 + 0.2 * i, 0.6 * math.sqrt(max(0.0, (n2 - i) * ds)))
+        add(v if i < n2 else 0.0, kappa)
+    return pts
+
+
+class SilPlant(Node):
+    def __init__(self):
+        super().__init__("sil_plant")
+        self.L = self.declare_parameter("wheelbase", 4.3).value
+        self.delay = self.declare_parameter("delay", 0.4).value
+        self.steer_tau = self.declare_parameter("steer_tau", 0.25).value
+        self.steer_rate = self.declare_parameter("max_steer_rate", 0.35).value
+        self.max_steer = self.declare_parameter("max_steer", 0.6).value
+        self.accel_tau = self.declare_parameter("accel_tau", 0.6).value
+        self.rr = self.declare_parameter("rolling_resistance", 0.03).value
+        self.grade = self.declare_parameter("grade", 0.0).value  # rad, uphill positive in +x of the body
+        self.dt = 0.02
+        self.x = self.y = self.yaw = self.v = self.steer = self.acc = 0.0
+        self.cmd = (0.0, -2.0, 1)  # steer, accel, gear
+        self.pipe = collections.deque()
+        self.t = 0.0
+        self.tfb = TransformBroadcaster(self)
+        self.odom = self.create_publisher(Odometry, "/localization/kinematic_state", 10)
+        self.vel = self.create_publisher(TwistWithCovarianceStamped, "/vehicle/status/velocity", 10)
+        self.str = self.create_publisher(SteeringReport, "/vehicle/status/steering", 10)
+        self.create_subscription(AckermannDriveStamped, "/control/command", self.on_cmd, 10)
+        if self.declare_parameter("publish_demo_trajectory", False).value:
+            q = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self.traj_pub = self.create_publisher(Trajectory, "/planning/trajectory", q)
+            self.publish_demo()
+        self.create_timer(self.dt, self.step)
+
+    def publish_demo(self):
+        m = Trajectory()
+        m.header.frame_id = "map"
+        m.header.stamp = self.get_clock().now().to_msg()
+        for x, y, yaw, v, kappa in demo_trajectory(self.L):
+            p = TrajectoryPoint()
+            p.pose.position.x, p.pose.position.y = x, y
+            p.pose.orientation.z, p.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+            p.longitudinal_velocity_mps = float(v)
+            p.front_wheel_angle_rad = float(math.atan(self.L * kappa))
+            m.points.append(p)
+        self.traj_pub.publish(m)
+
+    def on_cmd(self, m):
+        gear = 1 if m.drive.speed > 1e-3 else -1 if m.drive.speed < -1e-3 else self.cmd[2]
+        self.pipe.append((self.t + self.delay, (m.drive.steering_angle, m.drive.acceleration, gear)))
+
+    def step(self):
+        self.t += self.dt
+        while self.pipe and self.pipe[0][0] <= self.t:
+            self.cmd = self.pipe.popleft()[1]
+        steer_cmd, acc_cmd, gear = self.cmd
+        rate = max(-self.steer_rate, min(self.steer_rate, (max(-self.max_steer, min(self.max_steer, steer_cmd)) - self.steer) / self.steer_tau))
+        self.steer += rate * self.dt
+        self.acc += (acc_cmd - self.acc) * min(1.0, self.dt / self.accel_tau)
+        along = self.acc  # command convention: acceleration along the selected gear (> 0 speeds up)
+        if along >= 0:
+            a = along * gear  # body x
+        else:  # braking opposes the motion, whatever the gear
+            a = -math.copysign(min(-along, abs(self.v) / self.dt), self.v) if abs(self.v) > 1e-6 else 0.0
+        if abs(self.v) > 1e-3:
+            a -= math.copysign(self.rr * 9.81, self.v)
+        a -= 9.81 * math.sin(self.grade)
+        v_new = self.v + a * self.dt
+        if along <= 0 and self.v * v_new < 0:  # brakes stop, they do not reverse
+            v_new = 0.0
+        if abs(self.v) < 1e-3 and abs(v_new) < 0.05 and along <= 0.3:
+            v_new = 0.0  # hill hold
+        self.v = v_new
+        self.x += self.v * math.cos(self.yaw) * self.dt
+        self.y += self.v * math.sin(self.yaw) * self.dt
+        self.yaw += self.v * math.tan(self.steer) / self.L * self.dt
+        st = self.get_clock().now().to_msg()
+        o = Odometry()
+        o.header.stamp, o.header.frame_id, o.child_frame_id = st, "map", "base_link"
+        o.pose.pose.position.x, o.pose.pose.position.y = self.x, self.y
+        o.pose.pose.orientation.z, o.pose.pose.orientation.w = math.sin(self.yaw / 2), math.cos(self.yaw / 2)
+        o.twist.twist.linear.x = self.v
+        self.odom.publish(o)
+        t = TransformStamped()
+        t.header = o.header
+        t.child_frame_id = "base_link"
+        t.transform.translation.x, t.transform.translation.y = self.x, self.y
+        t.transform.rotation = o.pose.pose.orientation
+        self.tfb.sendTransform(t)
+        tw = TwistWithCovarianceStamped()
+        tw.header.stamp, tw.header.frame_id = st, "base_link"
+        tw.twist.twist.linear.x = self.v
+        self.vel.publish(tw)
+        sr = SteeringReport()
+        sr.stamp, sr.steering_tire_angle = st, float(self.steer)
+        self.str.publish(sr)
+
+
+def main():
+    rclpy.init()
+    rclpy.spin(SilPlant())
+
+
+if __name__ == "__main__":
+    main()

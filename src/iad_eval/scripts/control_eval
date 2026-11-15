@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Scores trajectory tracking against Gazebo ground truth (evaluation only).
+
+Lateral / heading error of the TRUE vehicle pose w.r.t. the planned trajectory (nearest segment), while
+moving; docking error (longitudinal, lateral, heading) of the true final pose vs the last trajectory point
+once the vehicle has stopped there. Publishes /eval/control (JSON)."""
+import json
+import math
+
+import rclpy
+from autoware_planning_msgs.msg import Trajectory
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from std_msgs.msg import String
+
+
+def yaw_of(q):
+    return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+
+
+class ControlEval(Node):
+    def __init__(self):
+        super().__init__("control_eval")
+        self.log_path = self.declare_parameter("log", "").value
+        self.traj, self.n, self.sum2, self.max, self.sumh2 = [], 0, 0.0, 0.0, 0.0
+        self.dock, self.still = None, 0
+        self.rows = []
+        self.pub = self.create_publisher(String, "/eval/control", 10)
+        from rclpy.qos import DurabilityPolicy, QoSProfile
+        self.create_subscription(Trajectory, "/planning/trajectory", self.on_traj,
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.create_subscription(Odometry, "/sim/ground_truth/odom", self.on_gt, 50)
+
+    def on_traj(self, m):
+        self.traj = [(p.pose.position.x, p.pose.position.y, yaw_of(p.pose.orientation), p.longitudinal_velocity_mps)
+                     for p in m.points]
+        self.dock, self.still = None, 0
+
+    def on_gt(self, m):
+        if len(self.traj) < 2:
+            return
+        x, y, yaw = m.pose.pose.position.x, m.pose.pose.position.y, yaw_of(m.pose.pose.orientation)
+        v = m.twist.twist.linear.x
+        best, bi = 1e18, 0
+        for i in range(len(self.traj) - 1):
+            (ax, ay, _, _), (bx, by, _, _) = self.traj[i], self.traj[i + 1]
+            dx, dy = bx - ax, by - ay
+            L2 = dx * dx + dy * dy
+            u = 0.0 if L2 < 1e-9 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
+            d = (ax + u * dx - x) ** 2 + (ay + u * dy - y) ** 2
+            if d < best:
+                best, bi = d, i
+        ax, ay, ayaw, _ = self.traj[bi]
+        lat = -(x - ax) * math.sin(ayaw) + (y - ay) * math.cos(ayaw)
+        head = math.degrees(math.remainder(yaw - ayaw, 2 * math.pi))
+        if abs(v) > 0.5:
+            self.n += 1
+            self.sum2 += lat * lat
+            self.sumh2 += head * head
+            self.max = max(self.max, abs(lat))
+        gx, gy, gyaw, _ = self.traj[-1]
+        if self.dock is None and abs(v) < 0.05 and math.hypot(x - gx, y - gy) < 4.0:
+            self.still += 1
+            if self.still > 50:
+                dx, dy = x - gx, y - gy
+                self.dock = (dx * math.cos(gyaw) + dy * math.sin(gyaw), -dx * math.sin(gyaw) + dy * math.cos(gyaw),
+                             math.degrees(math.remainder(yaw - gyaw, 2 * math.pi)))
+        else:
+            self.still = 0 if abs(v) > 0.05 else self.still
+        out = {"t": m.header.stamp.sec + 1e-9 * m.header.stamp.nanosec, "lat_err": lat, "head_err_deg": head,
+               "lat_rms": math.sqrt(self.sum2 / max(1, self.n)), "lat_max": self.max,
+               "head_rms_deg": math.sqrt(self.sumh2 / max(1, self.n)), "docked": self.dock is not None}
+        if self.dock:
+            out.update(dock_long=self.dock[0], dock_lat=self.dock[1], dock_head_deg=self.dock[2])
+        self.rows.append(out)
+        self.pub.publish(String(data=json.dumps(out)))
+
+    def summary(self):
+        s = f"control_eval: lateral RMS {math.sqrt(self.sum2 / max(1, self.n)):.3f} m, max {self.max:.3f} m"
+        if self.dock:
+            s += f", dock {self.dock[0]:+.2f} m long / {self.dock[1]:+.2f} m lat / {self.dock[2]:+.1f} deg"
+        return s
+
+
+def main():
+    rclpy.init()
+    n = ControlEval()
+    try:
+        rclpy.spin(n)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    print(n.summary(), flush=True)
+    if n.log_path:
+        with open(n.log_path, "w") as f:
+            for r in n.rows[::5]:
+                f.write(json.dumps(r) + "\n")
+
+
+if __name__ == "__main__":
+    main()

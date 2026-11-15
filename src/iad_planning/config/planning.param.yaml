@@ -1,0 +1,13 @@
+# iad_planning parameters. costmap_file / elevation_file / vehicle.* are set by the launch file.
+/**:
+  ros__parameters:
+    use_live_occupancy: true       # fuse /perception/occupancy_grid (near field) into the site costmap
+    live_occupancy_radius: 40.0    # [m] live lethal cells further away are ignored (handled by stop-and-replan)
+    occupancy_topic: /perception/occupancy_grid
+    odom_topic: /localization/kinematic_state
+    v_forward: 6.0                 # [m/s]
+    v_reverse: 1.6
+    max_expansions: 200000
+    steer_headroom: 0.8            # plan with 80 % of the steering range
+    wait_before_replan: 2.5        # [s] stopped for an obstacle before replanning around it
+    route_wait_before_replan: 25.0 # [s] on a route (haul road), wait this long for traffic before replanning
