@@ -2,6 +2,7 @@
 
 #include <random>
 
+#include "iad_planning/behaviour.hpp"
 #include "iad_planning/hybrid_astar.hpp"
 #include "iad_planning/reeds_shepp.hpp"
 #include "iad_planning/velocity.hpp"
@@ -65,4 +66,47 @@ TEST(HybridAStar, BacksIntoBay) {
   for (size_t i = 1; i + 1 < p.size(); ++i)
     if (p[i + 1].dir != p[i].dir) EXPECT_NEAR(t[i].v, 0.0, 1e-9);  // stop at every cusp
   EXPECT_NEAR(t.back().v, 0.0, 1e-9);
+}
+
+// Behaviour layer on a straight 100 m lane at 7 m/s (ego 4.2 m wide, front 6.6 m, rear 2.8 m).
+static Trajectory straightLane() {
+  Trajectory t;
+  for (int i = 0; i <= 100; ++i) {
+    TrajPoint p;
+    p.x = i, p.s = i, p.v = 7.0, p.dir = 1;
+    t.push_back(p);
+  }
+  return t;
+}
+
+TEST(Behaviour, FollowsPassesYieldsAndSlowsInDust) {
+  const Trajectory t = straightLane();
+  const BehaviourParams bp;
+  auto decide = [&](std::vector<Agent> a, int dust = 0) { return decideBehaviour(t, 2.1, 6.6, 2.8, 7.0, a, dust, bp); };
+  EXPECT_EQ(decide({}).name, "cruise");
+  // A slower truck 30 m ahead in the lane: follow it, never closer than follow_min.
+  const Behaviour f = decide({{30, 0.3, 4.0, 0, 9, 4}});
+  EXPECT_EQ(f.name, "follow");
+  EXPECT_LT(f.v_eff, 7.0);
+  EXPECT_NEAR(f.s_stop, 30 - 4.5 - bp.follow_min - 6.6, 1e-6);
+  // An oncoming truck in the other lane (9 m to the left): pass it at pass_v.
+  const Behaviour p = decide({{35, 9.0, -6.0, 0, 9, 4}});
+  EXPECT_EQ(p.name, "passing");
+  EXPECT_DOUBLE_EQ(p.v_eff, bp.pass_v);
+  // A pickup 12 m to the right, crossing towards the lane: stop before its crossing line.
+  const Behaviour y = decide({{25, -12.0, 0, 6.0, 5, 2}});
+  EXPECT_EQ(y.name, "yield");
+  EXPECT_LT(y.s_stop, 25 - 1 - 6.6);
+  EXPECT_EQ(decide({{25, -12.0, 0, -6.0, 5, 2}}).name, "cruise");  // driving away from the lane
+  // Dust in the lane ahead.
+  EXPECT_EQ(decide({}, 700).name, "dust");
+  EXPECT_DOUBLE_EQ(decide({}, 700).v_eff, bp.dust_v_heavy);
+  // The capped profile stops at the yield line and never asks for more than the cap.
+  const Trajectory c = applyBehaviour(t, y, 7.0, bp);
+  for (const auto& q : c) {
+    if (q.s >= y.s_stop) {
+      EXPECT_DOUBLE_EQ(q.v, 0.0);
+    }
+    EXPECT_LE(q.v, 7.0 + 1e-9);
+  }
 }

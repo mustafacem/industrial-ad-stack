@@ -82,6 +82,7 @@ struct Actor {
   double start_delay = 0.0;
   int dir = 1;
   bool bidirectional = false;  // shuttles back and forth without turning (straddle carriers, AGVs)
+  bool yields_to_traffic = false;  // gz: also give way to the other actors (not only to the ego)
   std::vector<Box> parts;     // actor frame: x forward, z up from ground
   bool emits_dust = false;
   Pose2 pose;

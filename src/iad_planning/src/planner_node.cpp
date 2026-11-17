@@ -1,22 +1,28 @@
 // planner_node: site costmap (+ live perception occupancy) -> Hybrid A* + Reeds-Shepp -> smoothed,
 // time-parameterised trajectory. While driving it checks the path ahead: an obstacle inside the
 // horizon first gets a stop line (a crossing vehicle usually clears); if it stays, the planner replans.
+// A behaviour layer caps the speed from tracked objects and dust (behaviour.hpp): follow, passing, yield, dust.
 //
 // In : costmap_file (nav2 map YAML/PGM) [+ elevation_file PCD], /perception/occupancy_grid,
-//      /localization/kinematic_state, /planning/goal (PoseStamped) or /planning/route (nav_msgs/Path)
+//      /localization/kinematic_state, /planning/goal (PoseStamped) or /planning/route (nav_msgs/Path),
+//      /perception/objects (autoware_perception_msgs/DetectedObjects), /perception/points/dust (PointCloud2)
 // Out: /planning/trajectory (autoware_planning_msgs/Trajectory, v < 0 = reverse), /planning/path,
 //      /planning/markers, /planning/search, /planning/metrics (JSON), /map/occupancy_grid (latched)
+#include <autoware_perception_msgs/msg/detected_objects.hpp>
 #include <autoware_planning_msgs/msg/trajectory.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <std_msgs/msg/string.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
+#include "iad_planning/behaviour.hpp"
 #include "iad_planning/hybrid_astar.hpp"
 #include "iad_planning/velocity.hpp"
 
@@ -44,6 +50,20 @@ class PlannerNode : public rclcpp::Node {
     tight.margin *= 0.5;
     tight_planner_ = std::make_unique<HybridAStar>(vp_, tight);
     route_wait_s_ = declare_parameter("route_wait_before_replan", 25.0);
+    behave_ = declare_parameter("behaviour.enabled", true);
+    bp_.pass_v = declare_parameter("behaviour.pass_speed", bp_.pass_v);
+    bp_.follow_time = declare_parameter("behaviour.follow_time_gap", bp_.follow_time);
+    bp_.follow_min = declare_parameter("behaviour.follow_min_gap", bp_.follow_min);
+    bp_.dust_v_light = declare_parameter("behaviour.dust_speed", bp_.dust_v_light);
+    bp_.dust_v_heavy = declare_parameter("behaviour.heavy_dust_speed", bp_.dust_v_heavy);
+    bp_.dust_light = int(declare_parameter("behaviour.dust_echoes", bp_.dust_light));
+    bp_.dust_heavy = int(declare_parameter("behaviour.heavy_dust_echoes", bp_.dust_heavy));
+    objects_sub_ = create_subscription<autoware_perception_msgs::msg::DetectedObjects>(
+        declare_parameter("objects_topic", "/perception/objects"), 5,
+        [this](autoware_perception_msgs::msg::DetectedObjects::ConstSharedPtr m) { onObjects(*m); });
+    dust_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        declare_parameter("dust_topic", "/perception/points/dust"), rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr m) { onDust(*m); });
 
     auto latched = rclcpp::QoS(1).transient_local().reliable();
     traj_pub_ = create_publisher<autoware_planning_msgs::msg::Trajectory>("/planning/trajectory", latched);
@@ -92,7 +112,7 @@ class PlannerNode : public rclcpp::Node {
         goal_ = {p.back().x, p.back().y, p.back().yaw}, have_goal_ = true;
         full_ = timeParameterize(p, site_, sp_, 0.0), prog_ = 0, state_ = "driving", stats_ = PlanStats{};
         stats_.status = "route";
-        publishTrajectory(full_, false);
+        publishTrajectory(full_, false), uncapped();  // a new reference: caps are re-applied if any
         RCLCPP_INFO(get_logger(), "route mode: %.0f m reference from /planning/route", full_.back().s);
       });
     timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(200), [this] { tick(); });
@@ -117,6 +137,9 @@ class PlannerNode : public rclcpp::Node {
         // Near field only: far-away live returns are sparse (and moving traffic leaves trails); a long-range
         // barrier would make the whole goal unreachable. Anything further is handled by stop-and-replan.
         const double d = std::hypot(live_.cx(i) - pose_.x, live_.cy(j) - pose_.y);
+        // Moving tracked objects (and their short occupancy trail) belong to the behaviour layer, not to the
+        // static stop / replan logic: a truck ahead is followed, a crossing one yielded to.
+        if (inMovingAgent(live_.cx(i), live_.cy(j))) continue;
         if (g.toCell(live_.cx(i), live_.cy(j), si, sj) && d > vp_.front + 1.0 && d < live_radius_) g.at(si, sj) = kLethal;
       }
     return g;
@@ -141,6 +164,7 @@ class PlannerNode : public rclcpp::Node {
       const double dg = std::hypot(pose_.x - goal_.x, pose_.y - goal_.y);
       if (dg < 1.2 && std::abs(v_) < 0.15 && prog_ + 5 >= full_.size()) state_ = "arrived";
       checkBlocked();
+      if (state_ == "driving" && !waiting_ && behave_) updateBehaviour();
     }
     publishMetrics();
   }
@@ -156,10 +180,14 @@ class PlannerNode : public rclcpp::Node {
       if (footprintCollides(g, rest[i].x, rest[i].y, rest[i].yaw, vp_, 0.15)) { hit = i; break; }
     }
     if (hit == SIZE_MAX) {
-      if (waiting_) waiting_ = false, publishTrajectory(full_traj_from(prog_), false);  // cleared: resume
+      block_n_ = 0;
+      if (waiting_) waiting_ = false, publishTrajectory(full_traj_from(prog_), false), uncapped();  // cleared: resume
       return;
     }
     blocked_s_ = s;
+    // Confirm a blockage over 3 ticks (0.6 s) unless it is inside the stopping distance (+5 m): a dust puff or a
+    // one-scan blip far ahead should not make a 72 t truck brake.
+    if (!waiting_ && ++block_n_ < 3 && s > v_ * v_ / (2 * 1.5) + 5.0) return;
     if (!waiting_) {
       waiting_ = true, wait_t0_ = now();
       Trajectory t = full_traj_from(prog_);
@@ -178,6 +206,86 @@ class PlannerNode : public rclcpp::Node {
       ++replans_, waiting_ = false;
       plan(pose_, 0);
     }
+  }
+
+  // Movers the behaviour layer may act on: vehicle-sized (long side), plausible speed, and consistent (position and
+  // velocity agree with the previous scans, velocity smoothed over them) for >= 4 scans. The tracker also gives dust puffs and berm fragments a
+  // velocity from one scan to the next; those are random and never become agents.
+  void onObjects(const autoware_perception_msgs::msg::DetectedObjects& m) {
+    const double dt = std::clamp((now() - agents_t_).seconds(), 0.02, 0.5);
+    std::vector<std::pair<Agent, int>> cand;
+    for (const auto& o : m.objects) {
+      const auto& k = o.kinematics;
+      if (!k.has_twist) continue;
+      const auto& q = k.pose_with_covariance.pose.orientation;
+      const double yaw = yawFromQuat(Eigen::Quaterniond(q.w, q.x, q.y, q.z)), c = std::cos(yaw), sn = std::sin(yaw);
+      const double tx = k.twist_with_covariance.twist.linear.x, ty = k.twist_with_covariance.twist.linear.y;
+      Agent a;
+      a.x = k.pose_with_covariance.pose.position.x, a.y = k.pose_with_covariance.pose.position.y;
+      a.vx = c * tx - sn * ty, a.vy = sn * tx + c * ty, a.length = o.shape.dimensions.x, a.width = o.shape.dimensions.y;
+      a.yaw = yaw;
+      const double v = std::hypot(a.vx, a.vy), big = std::max(a.length, a.width);
+      if (v < bp_.moving || v > 12.0 || big < 2.0 || big > 14.0) continue;
+      int n = 1;
+      const std::pair<Agent, int>* match = nullptr;
+      for (const auto& tr : tracks_) {
+        const Agent& p = tr.first;
+        if (std::hypot(p.x + p.vx * dt - a.x, p.y + p.vy * dt - a.y) < 2.5 && std::hypot(p.vx - a.vx, p.vy - a.vy) < 3.0 && tr.second + 1 > n)
+          n = tr.second + 1, match = &tr;
+      }
+      if (match) a.vx = 0.5 * (a.vx + match->first.vx), a.vy = 0.5 * (a.vy + match->first.vy);
+      cand.push_back({a, n});
+    }
+    tracks_ = cand, agents_.clear();
+    for (const auto& [a, n] : tracks_)
+      if (n >= 4) agents_.push_back(a);
+    agents_t_ = now();
+  }
+
+  // Dust echoes in the lane corridor ahead of the front (ego frame; the map-frame cloud is counted straight).
+  void onDust(const sensor_msgs::msg::PointCloud2& m) {
+    if (!have_pose_ || m.point_step < 8) return;
+    const double c = std::cos(pose_.yaw), sn = std::sin(pose_.yaw), half = vp_.width / 2 + 1.5;
+    int n = 0;
+    for (size_t k = 0; k + 8 <= m.data.size(); k += m.point_step) {
+      float x, y;
+      std::memcpy(&x, &m.data[k], 4), std::memcpy(&y, &m.data[k + 4], 4);
+      const double dx = x - pose_.x, dy = y - pose_.y, u = c * dx + sn * dy, l = -sn * dx + c * dy;
+      n += u > vp_.front && u < vp_.front + bp_.dust_range && std::abs(l) < half;
+    }
+    dust_n_ = n, dust_t_ = now();
+  }
+
+  std::vector<Agent> agentsNow() const {
+    return (now() - agents_t_).seconds() < 0.6 ? agents_ : std::vector<Agent>{};
+  }
+
+  bool inMovingAgent(double x, double y) const {
+    for (const auto& a : agentsNow()) {
+      const double v = std::hypot(a.vx, a.vy), c = a.vx / v, sn = a.vy / v, dx = x - a.x, dy = y - a.y;
+      const double u = c * dx + sn * dy, l = -sn * dx + c * dy, r = std::max(a.length, a.width) / 2 + 1.0;
+      if (u < r && u > -r - 1.0 * v && std::abs(l) < r) return true;  // + 1 s trail behind it
+    }
+    return false;
+  }
+
+  void uncapped() { pub_name_ = "cruise", pub_q_ = 99.0; }  // the last trajectory went out without caps
+
+  void updateBehaviour() {
+    const Trajectory rest = full_traj_from(prog_);
+    const int dust = (now() - dust_t_).seconds() < 0.6 ? dust_n_ : 0;
+    beh_ = decideBehaviour(rest, vp_.width / 2, vp_.front, vp_.rear, std::abs(v_), agentsNow(), dust, bp_);
+    const double q = beh_.v_eff > 1e8 ? 99.0 : std::round(beh_.v_eff * 2) / 2;  // 0.5 m/s steps
+    if (beh_.name == pub_name_ && std::abs(q - pub_q_) < 0.5) return;
+    // Tighten at once, relax at most once a second (each new trajectory resets the controller's integrator).
+    if (beh_.name == pub_name_ && q > pub_q_ && (now() - pub_t_).seconds() < 1.0) return;
+    pub_name_ = beh_.name, pub_q_ = q, pub_t_ = now();
+    const bool stop = beh_.s_stop < 1e8 && beh_.name == "yield";
+    if (stop) {
+      for (const auto& p : rest)
+        if (p.s >= beh_.s_stop) { stop_pose_ = {p.x, p.y, p.yaw}; break; }
+    }
+    publishTrajectory(applyBehaviour(rest, beh_, std::abs(v_), bp_), stop);
   }
 
   Trajectory full_traj_from(size_t k) const {
@@ -207,7 +315,7 @@ class PlannerNode : public rclcpp::Node {
     for (size_t i = 1; i < p.size(); ++i) cusps_ += p[i].dir != p[i - 1].dir;
     RCLCPP_INFO(get_logger(), "planned %.1f m, %d cusps, %d expansions, RS shot %s, %.0f ms", full_.back().s, cusps_, st.expansions,
                 st.rs_shot ? "yes" : "no", st.ms);
-    publishTrajectory(full_, false);
+    publishTrajectory(full_, false), uncapped();
     publishSearch(p);
   }
 
@@ -358,7 +466,9 @@ class PlannerNode : public rclcpp::Node {
        << ",\"expansions\":" << stats_.expansions << ",\"rs_shot\":" << (stats_.rs_shot ? "true" : "false")
        << ",\"status\":\"" << stats_.status << "\",\"length\":" << (full_.empty() ? 0.0 : full_.back().s) << ",\"cusps\":" << cusps_
        << ",\"replans\":" << replans_ << ",\"remaining\":" << remaining << ",\"blocked_at\":" << (waiting_ ? blocked_s_ : -1.0)
-       << ",\"goal\":[" << goal_.x << "," << goal_.y << "," << goal_.yaw << "]}";
+       << ",\"goal\":[" << goal_.x << "," << goal_.y << "," << goal_.yaw << "]"
+       << ",\"behaviour\":\"" << (waiting_ ? "stop" : beh_.name) << "\",\"behaviour_v\":" << (beh_.v_eff > 1e8 ? -1.0 : beh_.v_eff)
+       << ",\"behaviour_info\":" << beh_.info << ",\"dust_echoes\":" << dust_n_ << ",\"moving_objects\":" << agentsNow().size() << "}";
     std_msgs::msg::String s;
     s.data = js.str();
     metrics_pub_->publish(s);
@@ -367,6 +477,17 @@ class PlannerNode : public rclcpp::Node {
   VehicleParams vp_;
   PlannerParams pp_;
   SpeedParams sp_;
+  BehaviourParams bp_;
+  Behaviour beh_;
+  std::vector<Agent> agents_;
+  std::vector<std::pair<Agent, int>> tracks_;  // mover candidates and how many consistent scans they have
+  int dust_n_ = 0, block_n_ = 0;
+  bool behave_ = true;
+  std::string pub_name_ = "cruise";
+  double pub_q_ = 99.0;
+  rclcpp::Time agents_t_{0, 0, RCL_ROS_TIME}, dust_t_{0, 0, RCL_ROS_TIME}, pub_t_{0, 0, RCL_ROS_TIME};
+  rclcpp::Subscription<autoware_perception_msgs::msg::DetectedObjects>::SharedPtr objects_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr dust_sub_;
   std::unique_ptr<HybridAStar> planner_, tight_planner_;
   double route_wait_s_ = 25.0, viz_scale_ = 1.0;
   CostGrid site_, live_;

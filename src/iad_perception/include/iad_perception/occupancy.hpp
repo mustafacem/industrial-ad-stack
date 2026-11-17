@@ -3,6 +3,8 @@
 // sweeps; real obstacles accumulate. Each cell gets at most one update per scan.
 #pragma once
 #include <Eigen/Core>
+#include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <vector>
 
@@ -17,6 +19,11 @@ class LogOddsGrid {
     // A solid obstacle is hit on (nearly) every sweep, a dust plume cell only now and then: misses weigh almost
     // as much as hits, so intermittent returns never build up to "occupied".
     float l_hit = 0.85f, l_miss = -0.7f, l_min = -2.0f, l_max = 3.5f, l_occ = 1.6f, l_free = -0.4f;
+    // Inside a dense plume the ~5-10 % of dust the filter leaks is re-hit every sweep and never traced free (the
+    // rays end in the dust), so it walls a stopped truck in. A hit cell (3 x 3 neighbourhood) with more than
+    // dust_ratio dust echoes per obstacle echo gains dust_weight of the evidence and cannot reach "occupied" on
+    // its own. A solid object inside dust still returns more solid echoes than dust where it stands.
+    float dust_ratio = 2.0f, dust_weight = 0.3f;
   };
   explicit LogOddsGrid(const Params& p) : p_(p), n_(int(p.size / p.res)) {
     L_.assign(size_t(n_) * size_t(n_), 0.f);
@@ -45,8 +52,18 @@ class LogOddsGrid {
   }
 
   void integrate(const Eigen::Vector2d& o, const std::vector<Eigen::Vector2d>& hits,
-                 const std::vector<Eigen::Vector2d>& free_ends) {
+                 const std::vector<Eigen::Vector2d>& free_ends, const std::vector<Eigen::Vector2d>& dust = {}) {
     ++scan_;
+    hit_n_.assign(L_.size(), 0), dust_n_.assign(L_.size(), 0);
+    auto count = [&](const std::vector<Eigen::Vector2d>& pts, std::vector<uint16_t>& c) {
+      int i, j;
+      for (const auto& q : pts)
+        if (toCell(q, i, j))
+          for (int dj = -1; dj <= 1; ++dj)
+            for (int di = -1; di <= 1; ++di)
+              if (i + di >= 0 && j + dj >= 0 && i + di < n_ && j + dj < n_) ++c[idx(i + di, j + dj)];
+    };
+    count(hits, hit_n_), count(dust, dust_n_);
     int oi, oj;
     if (!toCell(o, oi, oj)) return;
     auto trace = [&](const Eigen::Vector2d& e, bool hit) {
@@ -77,7 +94,12 @@ class LogOddsGrid {
     for (const auto& e : free_ends) trace(e, false);
     for (const auto& h : hits) trace(h, true);
     for (size_t k = 0; k < L_.size(); ++k) {
-      if (hit_stamp_[k] == scan_) L_[k] = std::min(p_.l_max, L_[k] + p_.l_hit);
+      if (hit_stamp_[k] == scan_) {
+        if (float(dust_n_[k]) > p_.dust_ratio * float(hit_n_[k]))  // dust-dominated: slow, capped below occupied
+          L_[k] = std::min(L_[k] + p_.dust_weight * p_.l_hit, std::max(L_[k], p_.l_occ - 0.2f));
+        else
+          L_[k] = std::min(p_.l_max, L_[k] + p_.l_hit);
+      }
       else if (miss_stamp_[k] == scan_) L_[k] = std::max(p_.l_min, L_[k] + p_.l_miss);
     }
   }
@@ -112,6 +134,7 @@ class LogOddsGrid {
   uint32_t scan_ = 0;
   std::vector<float> L_;
   std::vector<uint32_t> hit_stamp_, miss_stamp_;
+  std::vector<uint16_t> hit_n_, dust_n_;
 };
 
 }  // namespace iad::perception

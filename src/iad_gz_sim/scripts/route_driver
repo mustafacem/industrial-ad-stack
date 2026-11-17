@@ -2,7 +2,8 @@
 """Stand-in safety driver for demos that evaluate one subsystem while the truck simply has to move
 (perception, localization, calibration drives). Follows a route from site.yaml using *ground-truth*
 odometry: pure pursuit + a P speed loop, sent as ackermann_msgs/AckermannDriveStamped on
-/control/command. It is part of the simulator, not of the autonomy stack."""
+/control/command. It keeps its distance behind traffic in its lane (ground-truth traffic poses). It is part of
+the simulator, not of the autonomy stack."""
 import math
 
 import rclpy
@@ -10,6 +11,7 @@ import yaml
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from tf2_msgs.msg import TFMessage
 
 
 class RouteDriver(Node):
@@ -26,6 +28,21 @@ class RouteDriver(Node):
         self.idx, self.t0, self.done = 0, None, False
         self.pub = self.create_publisher(AckermannDriveStamped, "/control/command", 10)
         self.create_subscription(Odometry, "/sim/ground_truth/odom", self.on_odom, 10)
+        self.traffic = {}
+        self.create_subscription(TFMessage, "/sim/traffic/poses", self.on_traffic, 20)
+
+    def on_traffic(self, m):
+        for tr in m.transforms:
+            self.traffic[tr.child_frame_id] = (tr.transform.translation.x, tr.transform.translation.y)
+
+    def gap_ahead(self, x, y, yaw):
+        """Distance from the front (6.6 m ahead of the rear axle) to the nearest traffic vehicle in the lane ahead."""
+        c, s, gap = math.cos(yaw), math.sin(yaw), 1e9
+        for px, py in self.traffic.values():
+            u, l = c * (px - x) + s * (py - y), -s * (px - x) + c * (py - y)
+            if 0 < u < 60 and abs(l) < 3.5:
+                gap = min(gap, u - 6.6 - 3.0)  # its origin is ~3 m ahead of its rear
+        return gap
 
     def curvature_ahead(self, i0, dist):
         n, k_max, travelled = len(self.pts), 0.0, 0.0
@@ -82,6 +99,7 @@ class RouteDriver(Node):
         k_ahead = self.curvature_ahead(self.idx, 25.0)
         v_ref = min(v_ref, math.sqrt(0.8 / max(k_ahead, 1e-4)))
         v_ref *= max(0.45, 1.0 - 1.2 * abs(steer))
+        v_ref = min(v_ref, math.sqrt(2 * 0.8 * max(0.0, self.gap_ahead(x, y, yaw) - 12.0)))  # keep >= 12 m
         acc = max(-2.0, min(1.2, 0.6 * (v_ref - v)))
         if v_ref < 0.05 and abs(v) < 0.5:
             acc = -1.0  # stopped / stopping: hold on the brakes (also on a slope)

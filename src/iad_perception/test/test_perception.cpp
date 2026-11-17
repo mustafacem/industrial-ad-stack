@@ -118,6 +118,21 @@ TEST(Objects, MinAreaRectRecoversRotatedBox) {
   EXPECT_NEAR(b.c.x(), 10, 0.05);
 }
 
+TEST(Occupancy, LeakedDustInsideAPlumeNeverBlocksButAnObjectInItDoes) {
+  LogOddsGrid g(LogOddsGrid::Params{});
+  g.recenter(0, 0);
+  const Eigen::Vector2d o(0, 0), leak(15, 0), rock(15, 6);
+  std::vector<Eigen::Vector2d> dust;
+  for (int k = 0; k < 12; ++k) dust.push_back({15.0 + 0.1 * (k % 4), 0.1 * (k / 4)});  // dense plume at the leak
+  for (int k = 0; k < 3; ++k) dust.push_back({15.0, 6.2});                          // a little dust at the rock
+  for (int k = 0; k < 40; ++k) g.integrate(o, {leak, rock, rock + Eigen::Vector2d(0.1, 0), rock + Eigen::Vector2d(0, 0.1)}, {}, dust);
+  int i, j;
+  ASSERT_TRUE(g.toCell(leak, i, j));
+  EXPECT_FALSE(g.occupied(g.idx(i, j)));  // re-hit 40 sweeps in a row, but dust-dominated
+  ASSERT_TRUE(g.toCell(rock, i, j));
+  EXPECT_TRUE(g.occupied(g.idx(i, j)));
+}
+
 TEST(Occupancy, TransientHitDecaysPersistentHitStays) {
   LogOddsGrid g(LogOddsGrid::Params{});
   g.recenter(0, 0);

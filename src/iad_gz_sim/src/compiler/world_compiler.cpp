@@ -454,9 +454,26 @@ int main(int argc, char** argv) {
 
   // ---- traffic: scripted kinematic models (visual only), moved by iad_gz_sim::Traffic
   std::ostringstream traffic;
+  // Footprints from the parts (local frame: x forward from the origin): the plugins yield on them.
+  struct Fp { std::string name; double rear = 0, front = 0, half = 0; };
+  std::vector<Fp> fps;
+  for (size_t k = 0; k < w.actors.size(); ++k) {
+    Fp f{w.actors[k].kind + "_" + std::to_string(k)};
+    for (const auto& p : w.actors[k].parts) {
+      const double c = std::abs(std::cos(p.yaw)), sn = std::abs(std::sin(p.yaw)), ex = p.half.x() * c + p.half.y() * sn;
+      f.front = std::max(f.front, p.c.x() + ex), f.rear = std::max(f.rear, ex - p.c.x());
+      f.half = std::max(f.half, std::abs(p.c.y()) + p.half.x() * sn + p.half.y() * c);
+    }
+    fps.push_back(f);
+  }
   int ai = 0;
   for (const auto& a : w.actors) {
+    const Fp& me = fps[size_t(ai)];
     const std::string n = a.kind + "_" + std::to_string(ai++);
+    std::ostringstream others;
+    if (a.yields_to_traffic)
+      for (const auto& o : fps)
+        if (o.name != n) others << o.name << " " << f3(o.rear) << " " << f3(o.front) << " " << f3(o.half) << ";";
     traffic << "<model name=\"" << n << "\"><static>false</static>" << poseStr(a.path[0].x(), a.path[0].y(), t.height(a.path[0].x(), a.path[0].y()), 0, 0, 0)
             << "<link name=\"link\"><gravity>false</gravity><inertial><mass>1000</mass></inertial>\n";
     int pi = 0;
@@ -472,18 +489,13 @@ int main(int argc, char** argv) {
               << "<particle_scatter_ratio>0.08</particle_scatter_ratio></particle_emitter>\n";
     std::ostringstream wp;
     for (const auto& p : a.path) wp << f3(p.x()) << " " << f3(p.y()) << " ";
-    double front = 0, half_w = 0;  // footprint from the parts (local frame: x forward from the origin)
-    for (const auto& p : a.parts) {
-      const double c = std::abs(std::cos(p.yaw)), sn = std::abs(std::sin(p.yaw));
-      front = std::max(front, p.c.x() + p.half.x() * c + p.half.y() * sn);
-      half_w = std::max(half_w, std::abs(p.c.y()) + p.half.x() * sn + p.half.y() * c);
-    }
     traffic << "</link><plugin filename=\"iad_gz_traffic\" name=\"iad_gz_sim::Traffic\"><terrain_grid>" << name
             << "/terrain.grid</terrain_grid><waypoints>" << wp.str() << "</waypoints><speed>" << a.speed << "</speed><loop>"
             << (a.loop ? 1 : 0) << "</loop><bidirectional>" << (a.bidirectional ? 1 : 0) << "</bidirectional><wait>"
             << a.wait_at_end << "</wait><start_s>" << a.s << "</start_s><start_dir>" << a.dir << "</start_dir><dust>"
-            << (a.emits_dust ? 1 : 0) << "</dust><front>" << f3(front) << "</front><half_width>" << f3(half_w)
-            << "</half_width></plugin></model>\n";
+            << (a.emits_dust ? 1 : 0) << "</dust><front>" << f3(me.front) << "</front><half_width>" << f3(me.half)
+            << "</half_width><start_delay>" << a.start_delay << "</start_delay><others>" << others.str()
+            << "</others></plugin></model>\n";
   }
 
   // ---- persistent dust sources (dump face, crusher, wind-blown road)

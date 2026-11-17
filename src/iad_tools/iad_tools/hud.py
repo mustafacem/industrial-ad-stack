@@ -192,9 +192,21 @@ class Hud(Node):
                  f"perception    dust removed {pct(pe.get('dust_recall', 0))}   {pe.get('objects', 0):2d} objects   {pe.get('median_ms', 0):4.1f} ms",
                  f"localization  error {span(f'{le:4.2f} m', GOOD if le < 0.2 else WARN)}   GNSS {g.get('status', '-'):9s}  NDT fit {lo.get('ndt_nvtl', 0):.2f}",
                  f"planning      path {pl.get('length', 0):4.0f} m   cusps {pl.get('cusps', 0)}   replans {pl.get('replans', 0)}",
+                 'behaviour     ' + self.behaviour_text(pl),
                  f"control       lateral {abs(co.get('lat_err', 0)):4.2f} m   heading {co.get('head_err_deg', 0):+5.1f} deg   {co.get('state', '')}",
                  self.vehicle_line()]
-        self.panel('/hud/mission', '<br>'.join(lines), w=640, h=172, size=12.5)
+        self.panel('/hud/mission', '<br>'.join(lines), w=640, h=190, size=12.5)
+
+    @staticmethod
+    def behaviour_text(pl):
+        b, v, info = pl.get('behaviour', 'cruise'), pl.get('behaviour_v', -1), pl.get('behaviour_info', 0)
+        cap = f'  {3.6 * v:4.1f} km/h' if v >= 0 else ''
+        text = {'dust': f'DUST in lane ({info:.0f} echoes): slow{cap}',
+                'follow': f'FOLLOW truck ahead, gap {info:4.1f} m{cap}',
+                'passing': f'PASSING oncoming truck{cap}',
+                'yield': f'YIELD to crossing vehicle {info:4.1f} m ahead',
+                'stop': 'STOP: obstacle on the path'}.get(b, 'cruise')
+        return span(text, FG if b == 'cruise' else WARN, b != 'cruise')
 
 
 def main():

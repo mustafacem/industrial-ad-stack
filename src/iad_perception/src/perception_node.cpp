@@ -161,12 +161,13 @@ class PerceptionNode : public rclcpp::Node {
     sw.reset();
     const Eigen::Vector3d origin = T_mb * T_bl.translation();
     grid_->recenter(origin.x(), origin.y());
-    std::vector<Eigen::Vector2d> hits, frees;
+    std::vector<Eigen::Vector2d> hits, frees, dusts;
     for (size_t i = 0; i < n; ++i) {
       if (cat[i] == kCatObstacle && in_cluster[i]) hits.push_back(M[i].head<2>().cast<double>());
       else if (cat[i] == kCatGround && (i % 2 == 0)) frees.push_back(M[i].head<2>().cast<double>());
+      else if (cat[i] == kCatDust) dusts.push_back(M[i].head<2>().cast<double>());
     }
-    grid_->integrate(origin.head<2>(), hits, frees);
+    grid_->integrate(origin.head<2>(), hits, frees, dusts);
     const double ms_grid = sw.ms();
     const double ms_total = total.ms();
 

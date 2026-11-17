@@ -2,8 +2,9 @@
 // Moves a kinematic, visual-only model along a polyline at a set speed: loop or ping-pong, optional wait
 // at the ends, "bidirectional" shuttles that reverse without turning. It follows the terrain height and
 // slope, smooths its heading at corners, and switches its dust emitter on while driving on loose ground.
-// It yields to the ego: it slows / stops when the ego's footprint is on its own path within its body length plus
-// stopping distance (the actors have no collisions, so without this they would drive through it).
+// It yields to the ego (and, if <others> lists them, to the other actors): it slows / stops when a footprint is on
+// its own path within its body length plus stopping distance (the actors have no collisions, so without this they
+// would drive through each other). <start_delay> holds it at its start for that long.
 #include <gz/msgs/particle_emitter.pb.h>
 #include <gz/msgs/pose_v.pb.h>
 
@@ -36,7 +37,17 @@ class Traffic : public gz::sim::System, public gz::sim::ISystemConfigure, public
     front_ = get("front", 1.0), half_ = get("half_width", 1.0), v_ = speed_;
     // ponytail: one ego footprint covering both vehicles (haul truck 2.8 + 6.6 x 4.2 m, AGV 3.0 + 10.0 x 3.0 m);
     // pass the real one from sim.launch if yielding ever looks too early.
-    ego_rear_ = get("ego_rear", 3.0), ego_front_ = get("ego_front", 10.0), ego_half_ = get("ego_half_width", 2.1);
+    others_.push_back({"ego", get("ego_rear", 3.0), get("ego_front", 10.0), get("ego_half_width", 2.1)});
+    if (sdf->HasElement("others")) {
+      std::stringstream os(sdf->Get<std::string>("others"));
+      std::string item;
+      while (std::getline(os, item, ';')) {
+        std::stringstream is(item);
+        Other o;
+        if (is >> o.name >> o.rear >> o.front >> o.half) others_.push_back(o);
+      }
+    }
+    wait_left_ = get("start_delay", 0.0);
     std::stringstream ss(sdf->Get<std::string>("waypoints"));
     double x, y;
     while (ss >> x >> y) pts_.push_back({x, y});
@@ -120,25 +131,36 @@ class Traffic : public gz::sim::System, public gz::sim::ISystemConfigure, public
  private:
   static constexpr double kAccel = 1.0, kDecel = 2.0, kGap = 4.0, kMargin = 1.0;
 
+  struct Other {
+    std::string name;
+    double rear = 0, front = 0, half = 0;
+    gz::sim::Entity e = gz::sim::kNullEntity;
+  };
+
   // Distance along its own path (from its origin, in the driving direction) to the first point that comes within
-  // half_ + kMargin of the ego footprint; +inf if the path is clear up to the body plus the stopping distance.
+  // half_ + kMargin of another footprint; +inf if the path is clear up to the body plus the stopping distance.
   double freeDistance(const gz::sim::EntityComponentManager& ecm) {
-    if (ego_ == gz::sim::kNullEntity)
-      ego_ = ecm.EntityByComponents(gz::sim::components::Name("ego"), gz::sim::components::Model());
-    if (ego_ == gz::sim::kNullEntity) return 1e9;
-    const gz::math::Pose3d P = gz::sim::worldPose(ego_, ecm);
-    const double c = std::cos(P.Rot().Yaw()), sn = std::sin(P.Rot().Yaw()), L = cum_.back();
-    const double reach = front_ + kGap + speed_ * speed_ / (2 * kDecel) + 2.0;
+    struct Box { double x, y, c, s, rear, front, half; };
+    std::vector<Box> boxes;
+    for (auto& o : others_) {
+      if (o.e == gz::sim::kNullEntity) o.e = ecm.EntityByComponents(gz::sim::components::Name(o.name), gz::sim::components::Model());
+      if (o.e == gz::sim::kNullEntity) continue;
+      const gz::math::Pose3d P = gz::sim::worldPose(o.e, ecm);
+      boxes.push_back({P.Pos().X(), P.Pos().Y(), std::cos(P.Rot().Yaw()), std::sin(P.Rot().Yaw()), o.rear, o.front, o.half});
+    }
+    if (boxes.empty()) return 1e9;
+    const double L = cum_.back(), reach = front_ + kGap + speed_ * speed_ / (2 * kDecel) + 2.0;
     for (double u = 0; u <= reach; u += 0.5) {
       double s = s_ + dir_ * u;
       if (loop_) s = std::fmod(std::fmod(s, L) + L, L);
       else if (s < 0 || s > L) break;
       double x, y, yaw;
       at(s, x, y, yaw);
-      const double dx = x - P.Pos().X(), dy = y - P.Pos().Y();
-      const double ex = c * dx + sn * dy, ey = -sn * dx + c * dy;  // path point in the ego frame
-      const double ox = std::max({-ego_rear_ - ex, 0.0, ex - ego_front_}), oy = std::max(std::abs(ey) - ego_half_, 0.0);
-      if (std::hypot(ox, oy) < half_ + kMargin) return u;
+      for (const auto& b : boxes) {
+        const double dx = x - b.x, dy = y - b.y, ex = b.c * dx + b.s * dy, ey = -b.s * dx + b.c * dy;  // in its frame
+        const double ox = std::max({-b.rear - ex, 0.0, ex - b.front}), oy = std::max(std::abs(ey) - b.half, 0.0);
+        if (std::hypot(ox, oy) < half_ + kMargin) return u;
+      }
     }
     return 1e9;
   }
@@ -159,8 +181,8 @@ class Traffic : public gz::sim::System, public gz::sim::ISystemConfigure, public
   std::vector<std::array<double, 2>> pts_;
   std::vector<double> cum_;
   double speed_ = 3, wait_ = 0, s_ = 0, wait_left_ = 0, yaw_ = 0, v_ = 0, front_ = 1, half_ = 1;
-  double ego_rear_ = 3, ego_front_ = 10, ego_half_ = 2.1, free_ = 1e9, last_check_ = -1;
-  gz::sim::Entity ego_{gz::sim::kNullEntity};
+  double free_ = 1e9, last_check_ = -1;
+  std::vector<Other> others_;
   int dir_ = 1;
   bool loop_ = true, bidir_ = false, dust_ = false, init_ = false, emitting_ = false;
   iad::gz::TerrainGrid terrain_;

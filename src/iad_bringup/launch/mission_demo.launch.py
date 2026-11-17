@@ -21,7 +21,7 @@ def setup(ctx):
     L = a["log_dir"]
     acts = [sim(world="quarry", vehicle="haul_truck", loaded=a["loaded"], ego_dust=a["ego_dust"], cameras=a["cameras"], duration=a["duration"],
                 start_after=a["start_after"], bag=a["bag"],
-                bag_topics="/localization/kinematic_state,/perception/occupancy_grid,/planning/goal,/planning/route,/planning/trajectory"),
+                bag_topics="/localization/kinematic_state,/perception/occupancy_grid,/perception/objects,/planning/goal,/planning/route,/planning/trajectory,/planning/metrics"),
             include("iad_localization", "localization.launch.py", rviz="false", vehicle="haul_truck", map_dir=maps),
             include("iad_perception", "perception.launch.py", rviz="false", vehicle="haul_truck"),
             include("iad_planning", "planning.launch.py", rviz="false", vehicle="haul_truck", map_dir=maps,

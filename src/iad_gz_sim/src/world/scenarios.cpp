@@ -352,24 +352,19 @@ World makeQuarry(uint32_t seed) {
   {
     Actor truck;
     truck.kind = "haul_truck";
-    // The loop stops well before the dump approach: the ego's dock manoeuvre swings across the road there and the
-    // turnaround link crosses the whole road. Both ends are timed so the turnarounds are away from the ego's pass.
+    // A slower loaded truck leads the ego in its lane (the ego follows it), turns round before the dump approach
+    // (the ego's dock manoeuvre swings across the road there) and comes back in the oncoming lane (the ego slows
+    // to pass it). It starts ~22 m ahead of the ego when the ego sets off, and gives way to the pickup.
     std::vector<Eigen::Vector2d> loop;
-    // Toward the dump in the ego's lane, back in the oncoming lane. 8 m/s: faster than the ego (7 m/s), so it never
-    // catches a truck ahead of it; a truck behind the ego follows it (the plugin yields).
     for (size_t k = 0; k <= k_end; k += 3) loop.push_back(laneAt(k, -kLane));
-    const size_t n_fwd = loop.size();
     for (size_t k = k_end + 1; k-- > 0;)
       if (k % 3 == 0) loop.push_back(laneAt(k, kLane));
     loop.push_back(loop.front());
-    truck.path = loop, truck.loop = true, truck.speed = 8.0, truck.emits_dust = true;
-    double L = 0, s_turn = 0;
-    for (size_t i = 0; i + 1 < loop.size(); ++i) {
-      L += (loop[i + 1] - loop[i]).norm();
-      if (i + 2 == n_fwd) s_turn = L;  // at the last point of the forward lane, before the turnaround link
-    }
-    // Phase: the far turnaround at sim t ~ 94 s, after the ego has passed it (~60 s).
-    truck.s = std::fmod(s_turn - truck.speed * 94.0 + 10 * L, L);
+    // No dust of its own: behind a dust-raising truck the ego would only ever show "dust" (and drop back).
+    truck.path = loop, truck.loop = true, truck.speed = 3.5, truck.emits_dust = false, truck.yields_to_traffic = true;
+    double s_ego = 0;  // arc length of the ego's start (road k = 8) along the loop
+    for (size_t k = 1; k <= 8; ++k) s_ego += (laneAt(k, -kLane) - laneAt(k - 1, -kLane)).norm();
+    truck.s = s_ego + 6.6 + 22.0 + 2.8, truck.start_delay = 10.0;  // ego front + gap + truck rear
     truck.parts = haulTruckParts(rgb(0.85f, 0.55f, 0.1f));
     w.actors.push_back(truck);
   }
@@ -377,7 +372,7 @@ World makeQuarry(uint32_t seed) {
     Actor lv;
     lv.kind = "light_vehicle";
     lv.path = {{40, -70}, {40, 40}, {48, 52}, {60, 52}, {68, 40}, {68, -70}, {60, -80}, {48, -80}, {40, -70}};
-    lv.loop = true, lv.speed = 6.0, lv.emits_dust = true, lv.s = 20;
+    lv.loop = true, lv.speed = 6.0, lv.emits_dust = true, lv.s = 20, lv.yields_to_traffic = true;
     lv.parts = pickupParts();
     w.actors.push_back(lv);
   }
@@ -400,9 +395,9 @@ World makeQuarry(uint32_t seed) {
   src(184, 4, 0.5, 4.5, 0.20, 10.0);  // tipping edge: over the drop, beyond the safety berm
   src(124, 58, 0.5, 5.0, 0.15, 6.0);
   {
-    // Left road edge, downwind (the wind carries it off the road): the ego passes beside a dense cloud. Centred on the
-    // road, the ~7 % of a persistent plume that the dust filter leaks built a wall the stopped truck could never pass.
-    auto [p, yaw] = roadPoint(0.30, 7.0);
+    // Across the whole road: the ego slows to dust speed and drives through (the occupancy grid does not let the
+    // ~7 % the dust filter leaks wall it in).
+    auto [p, yaw] = roadPoint(0.30, 0.0);
     src(p.x(), p.y(), 1.6, 6.0, 0.13, 13.0);
   }
   w.wind = Eigen::Vector2d(1.3, 0.5);

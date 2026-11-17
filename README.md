@@ -14,8 +14,8 @@ Every subsystem is an **independent ROS 2 package**:
 
 Every number below is measured against Gazebo ground truth by a separate evaluation package.
 
-**▶ [Showcase reel](media/showcase_reel.mp4)**  ·  six demos below  ·  `colcon test`: 35/35  ·  `scripts/isolation_check.sh`: 5/5 packages
-build and pass their tests alone (31 tests)  ·  `scripts/replay_check.sh`: 5/5 run from their bags alone
+**▶ [Showcase reel](media/showcase_reel.mp4)**  ·  six demos below  ·  `colcon test`: 37/37  ·  `scripts/isolation_check.sh`: 5/5 packages
+build and pass their tests alone (33 tests)  ·  `scripts/replay_check.sh`: 5/5 run from their bags alone
 
 ## Demos
 
@@ -24,12 +24,12 @@ both on the simulation-time axis.
 
 | # | Demo | Preview | Headline (vs. Gazebo ground truth) |
 |---|---|---|---|
-| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 14× fewer false obstacle points and 20× fewer phantom grid cells than a RANSAC baseline; 97 % ground recall; 79 % of dust removed; ~5 ms/frame |
+| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 11× fewer false obstacle points and 23× fewer phantom grid cells than a RANSAC baseline; 94 % ground recall; 77 % of dust removed; ~5 ms/frame |
 | 02 | [Localization: GNSS-degraded container terminal](media/02_localization.mp4) | ![](media/gif/02_localization.gif) | EKF + NDT **1.1 cm RMS** where GNSS-based filters reach 2.4–3.2 m (dead reckoning 50 m); initialises itself in 130 ms |
 | 03 | [Planning: free space, no lanes](media/03_planning.mp4) | ![](media/gif/03_planning.gif) | 228 m Hybrid A* + Reeds-Shepp in 0.8–1.3 s; stop and replan (160 m, 0.1–2 s) around an unmapped container |
 | 04 | [Control: 72 t truck, 0.4 s dead time](media/04_control.mp4) | ![](media/gif/04_control.gif) | MPC 7.6 cm lateral RMS, reverse-docks within 3 cm; without dead-time compensation it oscillates (2.8 m) |
 | 05 | [Calibration: four corner LiDARs, no targets](media/05_calibration.mp4) | ![](media/gif/05_calibration.gif) | 3.3–4.2° / 35–46 cm off → **0.014–0.021° / 0.5–1.1 cm** |
-| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; docks within 3 cm / 3.1° |
+| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; follows, passes and yields to traffic and slows in dust; docks within 6 cm / 2.9° |
 
 ## Architecture: five independent packages, one integration layer
 
@@ -94,10 +94,10 @@ Ground truth comes from `iad_eval/perception_eval`. It labels every output point
 
 | 903 frames, 90 s haul | baseline | this stack |
 |---|---|---|
-| false obstacle points per frame | 4 254 | **304** |
-| phantom occupied grid cells | 788 | **40** |
-| drivable ground kept as ground | 65 % | **97.0 %** |
-| dust echoes removed (dusty frames) | 0 % | **79 %** (precision 78 %) |
+| false obstacle points per frame | 4 978 | **448** |
+| phantom occupied grid cells | 928 | **40** |
+| drivable ground kept as ground | 60 % | **94.2 %** |
+| dust echoes removed (dusty frames) | 0 % | **77 %** (precision 79 %) |
 | latency per frame | – | ~5 ms |
 
 ## 2. Localization (`iad_localization`)
@@ -131,13 +131,21 @@ The 1 cm comes from a noise-free map that matches the simulated world exactly; o
 - **Speed.** A velocity profile limited by curvature, terrain and steering rate.
 - **Blocked path.** A stop line first; if the obstacle stays, a replan. On a surveyed route (haul road) the
   planner waits longer, because traffic usually clears.
+- **Behaviours.** Speed caps from perception's tracked objects and dust echoes (standard messages):
+  - slow down in dust (3 m/s, or 2 m/s in heavy dust);
+  - follow a slower truck in the lane (10 m + 2 s gap);
+  - pass oncoming traffic at 4 m/s;
+  - yield to a vehicle about to cross the path.
+
+  The layer only trusts movers that are vehicle-sized and consistent over 4 scans, because the tracker also
+  gives dust puffs and berm fragments velocities.
 - **Fallback.** A search boxed in by the safety margin retries with half the margin.
 
 | Query (port, container AGV, 13 m long) | result | time |
 |---|---|---|
 | start → RTG lane end | 228 m, 0 cusps | 0.8–1.3 s |
 | blocked by an unmapped container → replan | 160 m, 1 cusp | 0.1–2.1 s (depends on the live occupancy) |
-| RTG lane → under quay crane 2 | 217–220 m, 0 cusps | 0.12–0.21 s |
+| RTG lane → under quay crane 2 | 217–223 m, 0 cusps | 0.12–0.21 s |
 | quarry: dump approach → dump bay (reverse) | 90 m, 1 cusp | 0.04 s |
 
 ## 4. Control (`iad_control`)
@@ -177,13 +185,17 @@ three steps:
 
 The quarry haul cycle runs with every subsystem in the loop and no ground-truth shortcuts. The loaded haul
 truck:
-1. follows its lane of the two-lane haul road in route mode (it stops if perception reports the path blocked);
-2. passes oncoming trucks, a wind-blown dust cloud and an unmapped boulder;
+1. follows its lane of the two-lane haul road in route mode;
+2. reacts to what perception reports: it follows a slower loaded truck at a 12–23 m gap, slows to 2–3 m/s
+   through the wind-blown dust, passes the oncoming truck at 4 m/s, yields to crossing traffic, and stops
+   when the path stays blocked;
 3. Hybrid A*-plans and reverses into the dump bay.
 
-In the recorded run: lateral tracking 6.2 cm RMS, docking at 2 cm / 3 cm / 3.1°, and 198 false obstacle
-points/frame with 82 % of dust removed in the loop. A bag of that run confirms no contact with any traffic
-vehicle (closest approach 4.7 m). Localization was 1.2 cm RMS in the headless runs.
+The HUD shows the active behaviour. Scripted traffic gives way to the ego and to each other.
+
+In the recorded run: lateral tracking 4.2 cm RMS, docking at 6 cm / 6 cm / 2.9°, and 269 false obstacle
+points/frame with 81 % of dust removed in the loop. A bag of that run confirms no contact with any traffic
+vehicle (closest approach 3.8 m) and no rollback. Localization was 1.2 cm RMS in the headless runs.
 
 ## The simulation (`iad_gz_sim`, Gazebo Harmonic)
 
@@ -265,6 +277,10 @@ scripts/make_videos.sh        # record all demos (RViz capture + Gazebo GPU came
   U-turn crossed the dump bay, and nothing stopped a scripted truck from driving into it. The fixes were a
   two-lane road, traffic that yields, and a ground-truth footprint-overlap check on a bag of each recorded
   run.
+- **Phantom movers.** The first behaviour run stalled in the dust: the α-β tracker gives dust puffs and berm
+  fragments (one was 92 m long) speeds of 1–17 m/s, so the planner yielded to and followed ghosts. Movers now
+  have to be vehicle-sized and consistent over 4 scans. A truck seen from behind is a 4 × 0.2 m box across
+  the lane, so the size gate uses only the long side and the gap uses the box orientation.
 - **Rolling back 9 m.** A loaded truck stopped on the 9 % ramp rolled back into the truck behind it: the
   hill hold released at 0.15 m/s, and the weak stop request could not hold 72 t. The hold now stays on
   while the truck rolls against the gear.
@@ -276,9 +292,13 @@ scripts/make_videos.sh        # record all demos (RViz capture + Gazebo GPU came
 - **Results are from simulation.** Sensor models are Gazebo's (no motion distortion, ideal map). The
   1 cm localization and 0.02° calibration will not survive real data unchanged. The next step is replaying
   real or public bags through the same standalone packages.
-- **Dust.** Gazebo's particle dust is a crude stand-in for real dust. A truck standing still inside a dense
-  plume can still be fenced in by it, because the ~7 % the filter leaks builds a wall. That is why the
-  quarry's wind-blown plume sits at the road edge. Real systems add radar or last-return LiDAR modes.
+- **Dust.** Gazebo's particle dust is a crude stand-in for real dust. Occupancy cells dominated by dust echoes cannot turn
+  "occupied" on their own, so the ~7 % of a dense plume that the filter leaks no longer walls the truck in.
+  The price: an object hidden deep in dust with few solid returns is found late, which is why the truck slows
+  to 2–3 m/s in dust. Real systems add radar or last-return LiDAR modes.
+- **Behaviours.** Simple, rule-based speed caps on one route. There is no prediction beyond constant velocity,
+  no negotiation at intersections, and no overtaking. Scripted traffic gives way by simple rules (and to the
+  ego), as site rules would.
 - **Objects.** They are classified by size, and tracking is nearest-neighbour α-β.
 - **Real-time factor.** Recording (software RViz + GPU camera) runs at about 0.35×. The videos are retimed
   to simulation time.
