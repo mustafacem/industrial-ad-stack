@@ -149,8 +149,12 @@ class VehicleDrive : public gz::sim::System,
     const double along = acc_;  // command convention: acceleration along the selected gear (> 0 drives, < 0 brakes)
     // Hill hold at standstill unless the request is a real start (> 0.3 m/s^2 along the gear).
     // (A slow final creep with a small positive request keeps rolling; a stop request holds at once.)
-    hold_ = (std::abs(v_) < 0.05 && acc_req <= 0.3) || (std::abs(v_) < 0.15 && acc_req <= 0.0) || !active_ || timeout;
-    hold_ = hold_ && std::abs(v_) < 0.15;
+    // Under command, once engaged it stays on while the truck rolls back against the gear and the request is not a start
+    // (a loaded truck stopped on a grade): letting go at 0.15 m/s made it roll back metres, because a weak stop request
+    // cannot hold 72 t on 9 %. (Spawn settling, before the first command, is unchanged.)
+    const bool keep = active_ && !timeout && was_hold_ && v_ * gear_ <= 0.0 && acc_req <= 0.0;
+    hold_ = (((std::abs(v_) < 0.05 && acc_req <= 0.3) || (std::abs(v_) < 0.15 && acc_req <= 0.0) || !active_ || timeout) &&
+             std::abs(v_) < 0.15) || keep;
     if (hold_) {
       // Parking brake: a stiff torsional spring-damper on each wheel about the angle where the hold engaged,
       // clamped to the brake capacity (static friction of the brake discs).

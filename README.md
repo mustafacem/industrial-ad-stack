@@ -24,12 +24,12 @@ both on the simulation-time axis.
 
 | # | Demo | Preview | Headline (vs. Gazebo ground truth) |
 |---|---|---|---|
-| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 15× fewer false obstacle points and 38× fewer phantom grid cells than a RANSAC baseline; 96 % ground recall; 81 % of dust removed; ~5 ms/frame |
+| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 14× fewer false obstacle points and 20× fewer phantom grid cells than a RANSAC baseline; 97 % ground recall; 79 % of dust removed; ~5 ms/frame |
 | 02 | [Localization: GNSS-degraded container terminal](media/02_localization.mp4) | ![](media/gif/02_localization.gif) | EKF + NDT **1.1 cm RMS** where GNSS-based filters reach 2.4–3.2 m (dead reckoning 50 m); initialises itself in 130 ms |
 | 03 | [Planning: free space, no lanes](media/03_planning.mp4) | ![](media/gif/03_planning.gif) | 228 m Hybrid A* + Reeds-Shepp in 0.8–1.3 s; stop and replan (160 m, 0.1–2 s) around an unmapped container |
 | 04 | [Control: 72 t truck, 0.4 s dead time](media/04_control.mp4) | ![](media/gif/04_control.gif) | MPC 7.6 cm lateral RMS, reverse-docks within 3 cm; without dead-time compensation it oscillates (2.8 m) |
 | 05 | [Calibration: four corner LiDARs, no targets](media/05_calibration.mp4) | ![](media/gif/05_calibration.gif) | 3.3–4.2° / 35–46 cm off → **0.014–0.021° / 0.5–1.1 cm** |
-| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; docks within 2 cm / 1.3° |
+| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; docks within 3 cm / 3.1° |
 
 ## Architecture: five independent packages, one integration layer
 
@@ -92,12 +92,12 @@ as the baseline (one RANSAC ground plane, no dust filter) and as this stack.
 Ground truth comes from `iad_eval/perception_eval`. It labels every output point from the world geometry
 (terrain, structures, live traffic poses) and calls the rest airborne dust.
 
-| 902 frames, 90 s haul | baseline | this stack |
+| 903 frames, 90 s haul | baseline | this stack |
 |---|---|---|
-| false obstacle points per frame | 4 685 | **313** |
-| phantom occupied grid cells | 964 | **25** |
-| drivable ground kept as ground | 65 % | **96.4 %** |
-| dust echoes removed (dusty frames) | 0 % | **81 %** (precision 84 %) |
+| false obstacle points per frame | 4 254 | **304** |
+| phantom occupied grid cells | 788 | **40** |
+| drivable ground kept as ground | 65 % | **97.0 %** |
+| dust echoes removed (dusty frames) | 0 % | **79 %** (precision 78 %) |
 | latency per frame | – | ~5 ms |
 
 ## 2. Localization (`iad_localization`)
@@ -177,12 +177,13 @@ three steps:
 
 The quarry haul cycle runs with every subsystem in the loop and no ground-truth shortcuts. The loaded haul
 truck:
-1. follows the haul road in route mode;
-2. stops for oncoming traffic and dust, and replans around an unmapped boulder;
+1. follows its lane of the two-lane haul road in route mode (it stops if perception reports the path blocked);
+2. passes oncoming trucks, a wind-blown dust cloud and an unmapped boulder;
 3. Hybrid A*-plans and reverses into the dump bay.
 
-In the recorded run: lateral tracking 5.2 cm RMS, docking at 2 cm / 0.4 cm / 1.3°, and 222 false obstacle
-points/frame with 84 % of dust removed in the loop. Localization was 1.2 cm RMS in the headless runs.
+In the recorded run: lateral tracking 6.2 cm RMS, docking at 2 cm / 3 cm / 3.1°, and 198 false obstacle
+points/frame with 82 % of dust removed in the loop. A bag of that run confirms no contact with any traffic
+vehicle (closest approach 4.7 m). Localization was 1.2 cm RMS in the headless runs.
 
 ## The simulation (`iad_gz_sim`, Gazebo Harmonic)
 
@@ -190,7 +191,8 @@ points/frame with 84 % of dust removed in the loop. Localization was 1.2 cm RMS 
   - textured terrain meshes split by surface material, so LiDAR intensity follows the ground;
   - a collision mesh, plus a separate low-friction mud collision;
   - merged structure meshes with primitive collisions;
-  - scripted traffic and particle-emitter dust.
+  - scripted traffic and particle-emitter dust. Traffic vehicles are kinematic and visual only, so they yield:
+    each one slows and stops when the ego's footprint is on its path ahead.
 
   The same geometry writes the site files the subsystems load: `pointcloud_map.pcd`, `costmap.pgm/yaml`
   and `site.yaml`.
@@ -259,6 +261,13 @@ scripts/make_videos.sh        # record all demos (RViz capture + Gazebo GPU came
   half of the 1 s actuator latency, and a DART velocity-servo "hill hold" that produced no torque. Fixed
   with continuous arc-length progress, the full latency, a braking feed-forward and a parking-brake torque
   law.
+- **Traffic through the truck.** Traffic lanes 4 m from the centre line the truck drove overlapped it, a
+  U-turn crossed the dump bay, and nothing stopped a scripted truck from driving into it. The fixes were a
+  two-lane road, traffic that yields, and a ground-truth footprint-overlap check on a bag of each recorded
+  run.
+- **Rolling back 9 m.** A loaded truck stopped on the 9 % ramp rolled back into the truck behind it: the
+  hill hold released at 0.15 m/s, and the weak stop request could not hold 72 t. The hold now stays on
+  while the truck rolls against the gear.
 - **Delegation.** The calibration 6-DOF stage and the video compositor were written by Codex agents from
   task specs, then built, tested and measured here.
 
@@ -268,7 +277,8 @@ scripts/make_videos.sh        # record all demos (RViz capture + Gazebo GPU came
   1 cm localization and 0.02° calibration will not survive real data unchanged. The next step is replaying
   real or public bags through the same standalone packages.
 - **Dust.** Gazebo's particle dust is a crude stand-in for real dust. A truck standing still inside a dense
-  plume can still be fenced in by it; real systems add radar or last-return LiDAR modes.
+  plume can still be fenced in by it, because the ~7 % the filter leaks builds a wall. That is why the
+  quarry's wind-blown plume sits at the road edge. Real systems add radar or last-return LiDAR modes.
 - **Objects.** They are classified by size, and tracking is nearest-neighbour α-β.
 - **Real-time factor.** Recording (software RViz + GPU camera) runs at about 0.35×. The videos are retimed
   to simulation time.

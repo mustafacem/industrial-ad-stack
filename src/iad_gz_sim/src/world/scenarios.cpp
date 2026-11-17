@@ -320,6 +320,18 @@ World makeQuarry(uint32_t seed) {
     w.boxes.push_back(mkBox(x, y, z, 2.2, 1.6, 1.2, 0.3, rgb(0.9f, 0.9f, 0.9f), 0.5f));
     w.boxes.push_back(mkBox(x, y, z + 9, 1.8, 0.4, 1.0, 0.3, rgb(0.95f, 0.95f, 0.8f), 0.9f));
   }
+  // Two-lane haul road, keep right: the ego hauls toward the dump at -kLane, oncoming traffic at +kLane. Two ~4.2 m
+  // wide trucks pass ~4.8 m apart, ~2.4 m from the berms.
+  const double kLane = 4.5;
+  // Traffic only runs up to k_end; after it the ego eases back to the middle of the road (k75 = dump approach), which
+  // leaves room for the reverse manoeuvre into the dump bay.
+  const size_t k_end = road.size() * 62 / 100, k75 = road.size() * 3 / 4;
+  auto egoLane = [&](size_t k) { return -kLane * std::clamp(double(k75 - std::min(k, k75)) / double(k75 - k_end), 0.0, 1.0); };
+  auto laneAt = [&](size_t k, double d) {
+    const size_t k2 = std::min(k + 1, road.size() - 1), k1 = k2 - 1;
+    const Eigen::Vector2d t = (road[k2] - road[k1]).normalized(), nrm(-t.y(), t.x());
+    return Eigen::Vector2d(road[k] + d * nrm);
+  };
   // Unmapped obstacles on the haul road (the site map does not know them; perception must).
   auto roadPoint = [&](double frac, double lateral) {
     const size_t k = std::min(road.size() - 2, size_t(frac * double(road.size())));
@@ -327,12 +339,12 @@ World makeQuarry(uint32_t seed) {
     return std::pair<Eigen::Vector2d, double>{Eigen::Vector2d(road[k] + lateral * nrm), std::atan2(t.y(), t.x())};
   };
   {
-    auto [p, yaw] = roadPoint(0.50, 3.6);  // clear of the wind-blown dust stretch (0.30): the stop for it is in clean air
+    auto [p, yaw] = roadPoint(0.50, 0.0);  // between the lanes (both pass it at ~1.4 m), clear of the dust stretch (0.30)
     Cylinder c;
     c.x = p.x(), c.y = p.y(), c.r = 1.0, c.z0 = w.terrain.height(p.x(), p.y()) - 0.2, c.z1 = c.z0 + 1.6;
     c.color = rgb(0.55f, 0.5f, 0.45f), c.refl = 0.35f, c.in_map = false, c.rock = true;
     w.cylinders.push_back(c);
-    auto [q, yaw2] = roadPoint(0.72, -15.5);  // parked beyond the berm (flat ground), clear of the traffic lane at 7 +- 2 m
+    auto [q, yaw2] = roadPoint(0.72, -15.5);  // parked beyond the berm (flat ground), off the road
     placeComposite(w, pickupParts(), q.x(), q.y(), yaw2 + 0.25, false);
   }
 
@@ -340,30 +352,23 @@ World makeQuarry(uint32_t seed) {
   {
     Actor truck;
     truck.kind = "haul_truck";
-    // Lane centres: two 4 m wide trucks need > 4.1 m from the centre line the ego drives (4.0 overlapped it), and the
-    // outer edge (7 + 2) stays on the 9 m road.
-    const double lane = 7.0;
     // The loop stops well before the dump approach: the ego's dock manoeuvre swings across the road there and the
     // turnaround link crosses the whole road. Both ends are timed so the turnarounds are away from the ego's pass.
-    const size_t k_end = road.size() * 62 / 100;
     std::vector<Eigen::Vector2d> loop;
-    auto offset = [&](size_t k, double d) {
-      const size_t k2 = std::min(k + 1, road.size() - 1), k1 = k2 - 1;
-      const Eigen::Vector2d t = (road[k2] - road[k1]).normalized(), nrm(-t.y(), t.x());
-      return Eigen::Vector2d(road[k] + d * nrm);
-    };
-    for (size_t k = 0; k <= k_end; k += 3) loop.push_back(offset(k, -lane));
+    // Toward the dump in the ego's lane, back in the oncoming lane. 8 m/s: faster than the ego (7 m/s), so it never
+    // catches a truck ahead of it; a truck behind the ego follows it (the plugin yields).
+    for (size_t k = 0; k <= k_end; k += 3) loop.push_back(laneAt(k, -kLane));
     const size_t n_fwd = loop.size();
     for (size_t k = k_end + 1; k-- > 0;)
-      if (k % 3 == 0) loop.push_back(offset(k, lane));
+      if (k % 3 == 0) loop.push_back(laneAt(k, kLane));
     loop.push_back(loop.front());
-    truck.path = loop, truck.loop = true, truck.speed = 6.5, truck.emits_dust = true;
+    truck.path = loop, truck.loop = true, truck.speed = 8.0, truck.emits_dust = true;
     double L = 0, s_turn = 0;
     for (size_t i = 0; i + 1 < loop.size(); ++i) {
       L += (loop[i + 1] - loop[i]).norm();
       if (i + 2 == n_fwd) s_turn = L;  // at the last point of the forward lane, before the turnaround link
     }
-    // The far turnaround happens at sim t = 94 s (the ego passes it at ~60 s, half a loop period away).
+    // Phase: the far turnaround at sim t ~ 94 s, after the ego has passed it (~60 s).
     truck.s = std::fmod(s_turn - truck.speed * 94.0 + 10 * L, L);
     truck.parts = haulTruckParts(rgb(0.85f, 0.55f, 0.1f));
     w.actors.push_back(truck);
@@ -395,7 +400,9 @@ World makeQuarry(uint32_t seed) {
   src(184, 4, 0.5, 4.5, 0.20, 10.0);  // tipping edge: over the drop, beyond the safety berm
   src(124, 58, 0.5, 5.0, 0.15, 6.0);
   {
-    auto [p, yaw] = roadPoint(0.30, 0.0);
+    // Left road edge, downwind (the wind carries it off the road): the ego passes beside a dense cloud. Centred on the
+    // road, the ~7 % of a persistent plume that the dust filter leaks built a wall the stopped truck could never pass.
+    auto [p, yaw] = roadPoint(0.30, 7.0);
     src(p.x(), p.y(), 1.6, 6.0, 0.13, 13.0);
   }
   w.wind = Eigen::Vector2d(1.3, 0.5);
@@ -403,19 +410,23 @@ World makeQuarry(uint32_t seed) {
   // ---- routes + named poses
   Route haul;
   haul.name = "haul", haul.speed = 7.0;
-  for (size_t k = 8; k + 6 < road.size(); ++k) haul.pts.push_back(road[k]);
+  for (size_t k = 8; k + 6 < road.size(); ++k) haul.pts.push_back(laneAt(k, egoLane(k)));
   w.routes.push_back(haul);
   Route back = haul;
   back.name = "haul_back";
-  std::reverse(back.pts.begin(), back.pts.end());
+  back.pts.clear();
+  for (size_t k = road.size() - 7; k >= 8; --k) back.pts.push_back(laneAt(k, -egoLane(k)));
   w.routes.push_back(back);
   auto yawAt = [&](size_t k) { return std::atan2(road[k + 1].y() - road[k].y(), road[k + 1].x() - road[k].x()); };
-  w.poses.push_back({"start", road[8].x(), road[8].y(), yawAt(8)});
+  auto lanePose = [&](const char* n, size_t k) {
+    const Eigen::Vector2d p = laneAt(k, egoLane(k));
+    w.poses.push_back({n, p.x(), p.y(), yawAt(k)});
+  };
+  lanePose("start", 8);
   w.poses.push_back({"load", -137.0, 17.0, 0.35});
   w.poses.push_back({"dump", 167.5, 3.0, kPi});
-  w.poses.push_back({"haul_mid", road[road.size() / 2].x(), road[road.size() / 2].y(), yawAt(road.size() / 2)});
-  const size_t k75 = road.size() * 3 / 4;
-  w.poses.push_back({"dump_approach", road[k75].x(), road[k75].y(), yawAt(k75)});
+  lanePose("haul_mid", road.size() / 2);
+  lanePose("dump_approach", k75);
   return w;
 }
 
