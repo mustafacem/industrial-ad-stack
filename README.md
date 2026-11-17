@@ -24,12 +24,12 @@ both on the simulation-time axis.
 
 | # | Demo | Preview | Headline (vs. Gazebo ground truth) |
 |---|---|---|---|
-| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 16× fewer false obstacle points and 60× fewer phantom grid cells than a RANSAC baseline; 96 % ground recall; 82 % of dust removed; ~5 ms/frame |
+| 01 | [Perception: 3D LiDAR in quarry dust](media/01_perception.mp4) | ![](media/gif/01_perception.gif) | 15× fewer false obstacle points and 38× fewer phantom grid cells than a RANSAC baseline; 96 % ground recall; 81 % of dust removed; ~5 ms/frame |
 | 02 | [Localization: GNSS-degraded container terminal](media/02_localization.mp4) | ![](media/gif/02_localization.gif) | EKF + NDT **1.1 cm RMS** where GNSS-based filters reach 2.4–3.2 m (dead reckoning 50 m); initialises itself in 130 ms |
 | 03 | [Planning: free space, no lanes](media/03_planning.mp4) | ![](media/gif/03_planning.gif) | 228 m Hybrid A* + Reeds-Shepp in 0.8–1.3 s; stop and replan (160 m, 0.1–2 s) around an unmapped container |
 | 04 | [Control: 72 t truck, 0.4 s dead time](media/04_control.mp4) | ![](media/gif/04_control.gif) | MPC 7.6 cm lateral RMS, reverse-docks within 3 cm; without dead-time compensation it oscillates (2.8 m) |
 | 05 | [Calibration: four corner LiDARs, no targets](media/05_calibration.mp4) | ![](media/gif/05_calibration.gif) | 3.3–4.2° / 35–46 cm off → **0.014–0.021° / 0.5–1.1 cm** |
-| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; docks within 3 cm / 2.7° |
+| 06 | [Full stack: quarry haul cycle](media/06_full_mission.mp4) | ![](media/gif/06_full_mission.gif) | Gazebo sensors → localization → perception → planning → MPC → physics, no ground-truth shortcuts; docks within 2 cm / 1.3° |
 
 ## Architecture: five independent packages, one integration layer
 
@@ -92,12 +92,12 @@ as the baseline (one RANSAC ground plane, no dust filter) and as this stack.
 Ground truth comes from `iad_eval/perception_eval`. It labels every output point from the world geometry
 (terrain, structures, live traffic poses) and calls the rest airborne dust.
 
-| 951 frames, 95 s haul (bag replay) | baseline | this stack |
+| 902 frames, 90 s haul | baseline | this stack |
 |---|---|---|
-| false obstacle points per frame | 4 585 | **284** |
-| phantom occupied grid cells | 1 684 | **28** |
+| false obstacle points per frame | 4 685 | **313** |
+| phantom occupied grid cells | 964 | **25** |
 | drivable ground kept as ground | 65 % | **96.4 %** |
-| dust echoes removed (dusty frames) | 0 % | **82 %** (precision 84 %) |
+| dust echoes removed (dusty frames) | 0 % | **81 %** (precision 84 %) |
 | latency per frame | – | ~5 ms |
 
 ## 2. Localization (`iad_localization`)
@@ -181,8 +181,8 @@ truck:
 2. stops for oncoming traffic and dust, and replans around an unmapped boulder;
 3. Hybrid A*-plans and reverses into the dump bay.
 
-In the recorded run: lateral tracking 4.8 cm RMS, docking at 3 cm / 3 cm / 2.7°, and 296 false obstacle
-points/frame with 87 % of dust removed in the loop. Localization was 1.2 cm RMS in the headless runs.
+In the recorded run: lateral tracking 5.2 cm RMS, docking at 2 cm / 0.4 cm / 1.3°, and 222 false obstacle
+points/frame with 84 % of dust removed in the loop. Localization was 1.2 cm RMS in the headless runs.
 
 ## The simulation (`iad_gz_sim`, Gazebo Harmonic)
 

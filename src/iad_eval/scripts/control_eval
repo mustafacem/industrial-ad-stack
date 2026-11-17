@@ -87,7 +87,7 @@ def main():
     n = ControlEval()
     try:
         rclpy.spin(n)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+    except (KeyboardInterrupt, Exception):  # SIGINT during shutdown can also raise RCLError: still write the log
         pass
     print(n.summary(), flush=True)
     if n.log_path:

@@ -332,7 +332,7 @@ World makeQuarry(uint32_t seed) {
     c.x = p.x(), c.y = p.y(), c.r = 1.0, c.z0 = w.terrain.height(p.x(), p.y()) - 0.2, c.z1 = c.z0 + 1.6;
     c.color = rgb(0.55f, 0.5f, 0.45f), c.refl = 0.35f, c.in_map = false, c.rock = true;
     w.cylinders.push_back(c);
-    auto [q, yaw2] = roadPoint(0.72, -5.5);
+    auto [q, yaw2] = roadPoint(0.72, -15.5);  // parked beyond the berm (flat ground), clear of the traffic lane at 7 +- 2 m
     placeComposite(w, pickupParts(), q.x(), q.y(), yaw2 + 0.25, false);
   }
 
@@ -340,23 +340,31 @@ World makeQuarry(uint32_t seed) {
   {
     Actor truck;
     truck.kind = "haul_truck";
+    // Lane centres: two 4 m wide trucks need > 4.1 m from the centre line the ego drives (4.0 overlapped it), and the
+    // outer edge (7 + 2) stays on the 9 m road.
+    const double lane = 7.0;
+    // The loop stops well before the dump approach: the ego's dock manoeuvre swings across the road there and the
+    // turnaround link crosses the whole road. Both ends are timed so the turnarounds are away from the ego's pass.
+    const size_t k_end = road.size() * 62 / 100;
     std::vector<Eigen::Vector2d> loop;
-    for (size_t k = 0; k < road.size(); k += 3) {
+    auto offset = [&](size_t k, double d) {
       const size_t k2 = std::min(k + 1, road.size() - 1), k1 = k2 - 1;
       const Eigen::Vector2d t = (road[k2] - road[k1]).normalized(), nrm(-t.y(), t.x());
-      loop.push_back(road[k] - 4.0 * nrm);
-    }
-    for (size_t k = road.size(); k-- > 0;) {
-      if (k % 3) continue;
-      const size_t k2 = std::min(k + 1, road.size() - 1), k1 = k2 - 1;
-      const Eigen::Vector2d t = (road[k2] - road[k1]).normalized(), nrm(-t.y(), t.x());
-      loop.push_back(road[k] + 4.0 * nrm);
-    }
+      return Eigen::Vector2d(road[k] + d * nrm);
+    };
+    for (size_t k = 0; k <= k_end; k += 3) loop.push_back(offset(k, -lane));
+    const size_t n_fwd = loop.size();
+    for (size_t k = k_end + 1; k-- > 0;)
+      if (k % 3 == 0) loop.push_back(offset(k, lane));
     loop.push_back(loop.front());
     truck.path = loop, truck.loop = true, truck.speed = 6.5, truck.emits_dust = true;
-    double L = 0;
-    for (size_t i = 0; i + 1 < loop.size(); ++i) L += (loop[i + 1] - loop[i]).norm();
-    truck.s = 0.62 * L;
+    double L = 0, s_turn = 0;
+    for (size_t i = 0; i + 1 < loop.size(); ++i) {
+      L += (loop[i + 1] - loop[i]).norm();
+      if (i + 2 == n_fwd) s_turn = L;  // at the last point of the forward lane, before the turnaround link
+    }
+    // The far turnaround happens at sim t = 94 s (the ego passes it at ~60 s, half a loop period away).
+    truck.s = std::fmod(s_turn - truck.speed * 94.0 + 10 * L, L);
     truck.parts = haulTruckParts(rgb(0.85f, 0.55f, 0.1f));
     w.actors.push_back(truck);
   }
